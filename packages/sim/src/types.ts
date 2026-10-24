@@ -1,4 +1,4 @@
-import type { BType, NodeType, Res } from './defs';
+import type { BType, Difficulty, NodeType, Res } from './defs';
 
 /** Static map: identical for every game, derived from the real parish borders. */
 export interface MapData {
@@ -44,7 +44,9 @@ export interface State {
   buildings: Record<number, Building>;
   workers: Record<number, Worker>;
   players: Player[];
-  agro: { bbd: number };
+  difficulty: Difficulty;
+  /** target: the parish AgroCorp is saving up to buy; warned: whether that has been announced. */
+  agro: { bbd: number; target: number | null; warned: boolean };
   weather: { nextHurr: number; hurrWarned: boolean; nextDrought: number; droughtUntil: number; nextPest: number; stormT: number; hurrIdx: number };
   events: GameEvent[]; eventSeq: number;
   /** Bumps whenever parish ownership changes, so renderers know to redraw borders. */

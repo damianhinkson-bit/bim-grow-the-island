@@ -1,7 +1,7 @@
 import {
-  AGE_COST, AGE_T, AGRO, AGRO_HOME, BT, CARRY, DT, H, HNAMES, MAX_PLAYERS, NT, PLAYER_COLORS, SEA_R, SPEED, START_PARISHES, START_RES,
+  AGE_COST, AGE_T, AGRO, AGRO_HOME, BT, CARRY, DIFFICULTY, DT, DUES, H, HNAMES, STALL, MAX_PLAYERS, NT, PLAYER_COLORS, SEA_R, SPEED, START_PARISHES, START_RES,
   TRAIN, TRAIN_COST, W, WIN_N, canAfford, fmtCost, pay,
-  type BType, type NodeType, type Res,
+  type BType, type Difficulty, type NodeType, type Res,
 } from './defs';
 import { buildMap, inB, ix, iy } from './map';
 import { findPath, goalTest, passable } from './path';
@@ -13,7 +13,7 @@ import type { Building, GameEvent, Goal, MapData, Mode, Node, Parish, Player, St
 let MAP: { map: MapData; parishes: Parish[] } | null = null;
 function staticMap() { return (MAP ??= buildMap()); }
 
-export interface NewGameOptions { seed?: number; mode?: Mode; players: { name: string }[] }
+export interface NewGameOptions { seed?: number; mode?: Mode; difficulty?: Difficulty; players: { name: string }[] }
 
 const rand = (s: State) => nextRand(s);
 
@@ -25,7 +25,7 @@ export function createGame(o: NewGameOptions): State {
     seed, rng: seed, tick: 0, time: 0, mode: o.mode ?? 'coop', nextId: 1, map,
     parishes: parishes.map((p) => ({ ...p, owner: null })),
     nodes: [], nodeAt: new Int32Array(W * H).fill(-1), bAt: new Int32Array(W * H).fill(-1),
-    buildings: {}, workers: {}, players: [], agro: { bbd: 0 },
+    buildings: {}, workers: {}, players: [], difficulty: o.difficulty ?? 'normal', agro: { bbd: 0, target: null, warned: false },
     weather: { nextHurr: 300, hurrWarned: false, nextDrought: 210, droughtUntil: -1, nextPest: 130, stormT: 0, hurrIdx: 0 },
     events: [], eventSeq: 0, parishVersion: 1, ended: null,
   };
@@ -319,7 +319,7 @@ export function step(s: State): void {
       p.ageT += dt;
       if (p.ageT >= AGE_T) { p.ageT = -1; p.age = 2; emit(s, 'good', 'Co-op Age reached. Aquaponics and solar unlocked.', p.id); }
     }
-    p.res.bbd += 0.4 * owned(s, p.id) * dt;
+    p.res.bbd += DUES * owned(s, p.id) * dt;
   }
   for (const b of Object.values(s.buildings)) {
     if (b.pest > 0) b.pest -= dt;
@@ -382,21 +382,42 @@ function setOwner(s: State, p: Parish, o: string | null) {
   p.owner = o; s.parishVersion++;
 }
 
-function rival(s: State, dt: number) {
-  const n = s.players.length;
-  const scale = s.mode === 'coop' ? 1 + 0.35 * (n - 1) : 1 + 0.15 * (n - 1);
-  s.agro.bbd += (1 + 0.25 * owned(s, AGRO)) * scale * dt;
-  const cost = rivalCost(s); if (s.agro.bbd < cost) return;
+/** Parishes AgroCorp could buy next: unclaimed ones next to its land, else players' parishes next to it that have no buildings. */
+export function rivalOptions(s: State): { list: Parish[]; mult: number } {
   const nearR = (p: Parish) => p.adj.some((a) => s.parishes[a].owner === AGRO);
-  let t = s.parishes.filter((p) => p.owner === null && nearR(p)), price = cost;
-  if (!t.length) {
-    t = s.parishes.filter((p) => { const o = p.owner && p.owner !== AGRO ? player(s, p.owner) : undefined; return o && p.id !== o.home && nearR(p) && !parishBuilt(s, p, o.id); });
-    price = cost * 1.5;
+  const free = s.parishes.filter((p) => p.owner === null && nearR(p));
+  if (free.length) return { list: free, mult: 1 };
+  const weak = s.parishes.filter((p) => { const o = p.owner && p.owner !== AGRO ? player(s, p.owner) : undefined; return !!o && p.id !== o.home && nearR(p) && !parishBuilt(s, p, o.id); });
+  return { list: weak, mult: 1.5 };
+}
+export function rivalPrice(s: State): number {
+  const { mult } = rivalOptions(s); return rivalCost(s) * mult;
+}
+
+function rival(s: State, dt: number) {
+  const d = DIFFICULTY[s.difficulty], n = s.players.length;
+  if (s.time < d.grace) return;
+  const scale = s.mode === 'coop' ? 1 + 0.35 * (n - 1) : 1 + 0.15 * (n - 1);
+  s.agro.bbd += (1 + d.growth * owned(s, AGRO)) * d.rate * scale * dt;
+  const { list, mult } = rivalOptions(s);
+  const ag = s.agro;
+  // keep a target, and drop it if the parish is no longer available
+  if (ag.target !== null && !list.some((p) => p.id === ag.target)) { ag.target = null; ag.warned = false; }
+  if (!list.length) return;
+  if (ag.target === null) {
+    // prefer the parish next to the most AgroCorp land, ties broken at random
+    const score = (p: Parish) => p.adj.filter((a) => s.parishes[a].owner === AGRO).length;
+    const best = Math.max(...list.map(score)), top = list.filter((p) => score(p) === best);
+    ag.target = top[Math.floor(rand(s) * top.length)].id; ag.warned = false;
   }
-  if (!t.length) { t = s.parishes.filter((p) => p.owner === null); price = cost; }
-  if (!t.length || s.agro.bbd < price) return;
-  const p = t[Math.floor(rand(s) * t.length)], was = p.owner;
-  s.agro.bbd -= price; setOwner(s, p, AGRO);
+  const p = s.parishes[ag.target], price = rivalCost(s) * mult;
+  if (!ag.warned && ag.bbd >= price * d.warnAt) {
+    ag.warned = true;
+    emit(s, 'warn', p.owner ? `AgroCorp is about to buy out ${p.name}. Put a building there to keep it.` : `AgroCorp is about to buy up ${p.name}. Feed it first to keep it out of their hands.`);
+  }
+  if (ag.bbd < price) return;
+  const was = p.owner;
+  ag.bbd -= price; ag.target = null; ag.warned = false; setOwner(s, p, AGRO);
   if (was) emit(s, 'bad', `AgroCorp bought out ${p.name}. It had no buildings to hold it.`, was);
   emit(s, 'bad', `AgroCorp bought up ${p.name}.`);
 }
@@ -417,7 +438,7 @@ function checkEnd(s: State) {
 
 // ---------- commands
 
-export type MarketTrade = 'sell-food' | 'sell-stone' | 'buy-water';
+export type MarketTrade = 'sell-food' | 'sell-stone' | 'buy-water' | 'stall-food';
 export type Command =
   | { type: 'move'; workers: number[]; tile: number }
   | { type: 'gather'; workers: number[]; node: number }
@@ -484,6 +505,11 @@ export function applyCommand(s: State, pid: string, c: Command): CmdResult {
       pay(me.res, AGE_COST); me.ageT = 0; emit(s, 'info', 'Your co-op is organising. Co-op Age in 40s.', pid); return { ok: true };
     }
     case 'market': {
+      if (c.trade === 'stall-food') {
+        if (!tcOf(s, pid)) return fail('You need a Town Centre.');
+        if (me.res.food < STALL.food) return fail(`Selling at the stall needs ${STALL.food} food.`);
+        me.res.food -= STALL.food; me.res.bbd += STALL.bbd; return { ok: true };
+      }
       if (!Object.values(s.buildings).some((b) => b.owner === pid && b.type === 'market' && b.done)) return fail('You need a Market first.');
       if (c.trade === 'sell-food') { if (me.res.food < 100) return fail('Not enough food.'); me.res.food -= 100; me.res.bbd += 50; }
       else if (c.trade === 'sell-stone') { if (me.res.stone < 100) return fail('Not enough stone.'); me.res.stone -= 100; me.res.bbd += 40; }
@@ -512,7 +538,7 @@ export function applyCommand(s: State, pid: string, c: Command): CmdResult {
 export function stateHash(s: State): string {
   let h = 2166136261;
   const mix = (v: number) => { h ^= Math.round(v * 1000) | 0; h = Math.imul(h, 16777619); };
-  mix(s.tick); mix(s.rng); mix(s.agro.bbd);
+  mix(s.tick); mix(s.rng); mix(s.agro.bbd); mix(s.agro.target ?? -1);
   for (const p of s.players) { mix(p.res.food); mix(p.res.water); mix(p.res.stone); mix(p.res.bbd); mix(p.age); }
   for (const w of Object.values(s.workers)) { mix(w.id); mix(w.x); mix(w.y); mix(w.amt); }
   for (const b of Object.values(s.buildings)) { mix(b.id); mix(b.hp); mix(b.progress); }

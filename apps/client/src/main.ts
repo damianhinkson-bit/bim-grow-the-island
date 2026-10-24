@@ -13,11 +13,10 @@ async function boot() {
     r.centerOn(home.lx, home.ly);
   };
   centerHome();
-  const ui = new UI(game, r, () => {
-    game = new LocalGame({ players: 1 });
+  const ui = new UI(game, r, (difficulty) => {
+    game = new LocalGame({ players: 1, difficulty });
     r.setGame(game); ui.setGame(game); centerHome(); ui.start();
   });
-  document.getElementById('start')!.onclick = () => ui.start();
   addEventListener('resize', () => r.clampCam());
   r.app.ticker.add((t) => {
     const dt = t.deltaMS / 1000;

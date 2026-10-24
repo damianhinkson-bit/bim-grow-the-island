@@ -117,6 +117,10 @@ export class Renderer {
       const p = s.parishes[sel.id]; const pts = p.poly.map((v) => v * T);
       g.poly(pts).fill({ color: 0xffffff, alpha: 0.16 }).stroke({ width: 2 / this.z, color: 0xffffff });
     }
+    if (s.agro.warned && s.agro.target !== null) {
+      const pts = s.parishes[s.agro.target].poly.map((v) => v * T), pulse = 0.55 + 0.45 * Math.sin(this.time * 5);
+      g.poly(pts).fill({ color: 0xe2553f, alpha: 0.12 * pulse }).stroke({ width: 3 / this.z, color: 0xff6a52, alpha: pulse });
+    }
     if (view.buildMode) {
       const x0 = Math.max(0, Math.floor(this.cam.x / T) - 1), y0 = Math.max(0, Math.floor(this.cam.y / T) - 1);
       const x1 = Math.min(W - 1, Math.ceil((this.cam.x + this.vw / this.z) / T) + 1), y1 = Math.min(H - 1, Math.ceil((this.cam.y + this.vh / this.z) / T) + 1);

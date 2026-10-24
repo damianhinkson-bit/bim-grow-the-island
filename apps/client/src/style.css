@@ -62,3 +62,15 @@ body{background:var(--sea);color:var(--fg);font-family:var(--body);-webkit-user-
 .credit{margin:12px 0 0;font-size:11px;color:var(--muted);text-align:center}
 .kicker{font-size:11px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
 @media (prefers-reduced-motion:reduce){.toast{transition:none}}
+
+.chip-btn{pointer-events:auto;font:inherit;font-weight:600;font-size:12.5px;color:var(--fg);cursor:pointer}
+.chip-btn:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.rate{font-weight:600;color:var(--leaf);font-size:11px}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:4px 0 14px}
+.seg-b{font:inherit;font-weight:800;font-size:14px;color:var(--fg);background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 6px;cursor:pointer;text-align:center;line-height:1.2}
+.seg-b small{display:block;font-weight:400;font-size:11px;color:var(--muted);margin-top:2px}
+.seg-b.on{background:var(--gold);color:var(--ink);border-color:var(--gold)}
+.seg-b.on small{color:#4a3a05}
+.seg-b:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.money{margin:0 0 8px;padding-left:18px;color:var(--muted);font-size:13.5px;line-height:1.45}
+.money strong{color:var(--fg)}

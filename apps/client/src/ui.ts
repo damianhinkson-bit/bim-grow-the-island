@@ -1,7 +1,7 @@
 import {
-  AGE_COST, AGE_T, AGRO, AGRO_HOME, BT, BUILD_LIST, NT, TRAIN, W, aquaPowered, canAfford, claimBlock, claimCost, drought, fmtCost, owned,
+  AGE_COST, AGE_T, AGRO, AGRO_HOME, BT, BUILD_LIST, DUES, NT, STALL, TRAIN, W, aquaPowered, canAfford, claimBlock, claimCost, drought, fmtCost, owned,
   parishBuilt, player, popCap, protectedB, rivalCost, tcOf, teamOwned, winTarget, workersOf,
-  type BType, type Command, type State, type Worker,
+  type BType, type Command, type Difficulty, type State, type Worker,
 } from '@bim/sim';
 import type { GameSession } from './game';
 import type { Renderer, View } from './render';
@@ -12,7 +12,8 @@ const fmtT = (sec: number) => { const s = Math.max(0, Math.ceil(sec)); return `$
 
 export class UI {
   view: View = { sel: null, buildMode: null, marks: [] };
-  private menu: 'build' | null = null;
+  private menu: 'build' | 'money' | null = null;
+  difficulty: Difficulty = 'normal';
   private lastPanel = '';
   private panelT = 0;
   private miniT = 0;
@@ -22,8 +23,8 @@ export class UI {
   private mini = $<HTMLCanvasElement>('#mini');
   running = false;
 
-  constructor(private game: GameSession, private r: Renderer, private onRestart: () => void) {
-    this.bindPanel(); this.bindBar(); this.bindInput(); this.bindKeys();
+  constructor(private game: GameSession, private r: Renderer, private onStart: (d: Difficulty) => void) {
+    this.bindPanel(); this.bindBar(); this.bindInput(); this.bindKeys(); this.bindStart();
   }
   setGame(game: GameSession) { this.game = game; this.view = { sel: null, buildMode: null, marks: [] }; this.menu = null; this.lastPanel = ''; this.hudCache = {}; }
 
@@ -102,7 +103,8 @@ export class UI {
     else if (a === 'deselect') { this.view.sel = null; this.menu = null; this.view.buildMode = null; }
     else if (a === 'train' && tc) this.send({ type: 'train', building: tc.id });
     else if (a === 'age') this.send({ type: 'age' });
-    else if (a === 'sell-food' || a === 'sell-stone' || a === 'buy-water') this.send({ type: 'market', trade: a });
+    else if (a === 'sell-food' || a === 'sell-stone' || a === 'buy-water' || a === 'stall-food') this.send({ type: 'market', trade: a });
+    else if (a === 'money') { this.menu = this.menu === 'money' ? null : 'money'; this.view.buildMode = null; }
     else if (a === 'repair' && sel?.kind === 'building') this.send({ type: 'repair', building: sel.id });
     else if (a === 'claim' && sel?.kind === 'parish') this.send({ type: 'claim', parish: sel.id });
     this.renderPanel(true);
@@ -129,6 +131,14 @@ export class UI {
     if (this.view.buildMode) {
       const d = BT[this.view.buildMode];
       return `<h3>Place ${d.name}</h3><p>Tap ${d.coast ? 'a coast tile' : 'an empty tile'} inside your parishes. ${d.desc}</p><div class="btns">${this.btn('cancel', 'Cancel')}</div>`;
+    }
+    if (this.menu === 'money') {
+      const n = owned(s, me.id), hasMarket = Object.values(s.buildings).some((b) => b.owner === me.id && b.type === 'market' && b.done);
+      return `<h3>Earning BBD</h3><ul class="money">
+        <li><strong>Co-op dues:</strong> every parish you feed pays ${DUES} BBD a second. You feed ${n}, so you earn <strong>${Math.round(DUES * n * 60)} BBD a minute</strong>. Feeding more parishes is the main way to grow your income.</li>
+        <li><strong>Roadside stall</strong> at your Town Centre: sell ${STALL.food} food for ${STALL.bbd} BBD, any time.</li>
+        <li><strong>Market</strong> (${fmtCost(BT.market.cost)}): better prices, 100 food for 50 BBD or 100 stone for 40 BBD.${hasMarket ? ' You have one.' : ''}</li>
+      </ul><div class="btns">${tcOf(s, me.id) ? this.btn('stall-food', `Sell ${STALL.food} food now`, `+${STALL.bbd} BBD`, { primary: true, disabled: me.res.food < STALL.food }) : ''}${this.btn('deselect', 'Close')}</div>`;
     }
     if (this.menu === 'build') {
       return `<h3>Build</h3><p>Costs come out when you place it. Selected or idle workers go build it.</p><div class="grid2">${BUILD_LIST.map((k) => {
@@ -157,6 +167,7 @@ export class UI {
       if (b.type === 'tc' && mine) {
         info = `Trains workers. ${b.queue ? `Training ${b.queue} (next in ${Math.ceil(TRAIN - b.trainT)}s${workersOf(s, me.id).length >= popCap(s, me.id) ? ', needs a house' : ''}).` : ''}`;
         btns += this.btn('train', 'Train worker', '50 food', { primary: true, disabled: me.res.food < 50 || b.queue >= 5 });
+        btns += this.btn('stall-food', `Sell ${STALL.food} food`, `+${STALL.bbd} BBD`, { disabled: me.res.food < STALL.food });
         if (me.age === 1) btns += me.ageT >= 0 ? this.btn('noop', 'Advancing…', `${Math.ceil(AGE_T - me.ageT)}s left`, { disabled: true }) : this.btn('age', 'Co-op Age', fmtCost(AGE_COST), { disabled: !canAfford(me.res, AGE_COST) });
       }
       if (b.type === 'market' && mine) btns += this.btn('sell-food', 'Sell 100 food', '+50 BBD', { disabled: me.res.food < 100 }) + this.btn('sell-stone', 'Sell 100 stone', '+40 BBD', { disabled: me.res.stone < 100 }) + this.btn('buy-water', 'Truck in 100 water', '50 BBD', { disabled: me.res.bbd < 50 });
@@ -182,6 +193,7 @@ export class UI {
           b2 = this.btn('claim', p.owner ? 'Win it over' : 'Feed this parish', fmtCost(c), { primary: true, disabled: !canAfford(me.res, c) });
         } else body = block;
       }
+      if (s.agro.target === p.id && s.agro.warned) body += ' <strong>AgroCorp is about to buy it.</strong>';
       return `<h3>${p.name}</h3><p>${tag} ${body}</p><div class="btns">${b2}${this.btn('deselect', 'Close')}</div>`;
     }
     return '';
@@ -197,6 +209,7 @@ export class UI {
   }
   private bindBar() {
     $('#b-build').onclick = () => { if (this.running) this.act('build'); };
+    $('#c-bbd').onclick = () => { if (this.running) this.act('money'); };
     $('#b-all').onclick = () => { if (!this.running) return; this.view.sel = { kind: 'workers', ids: new Set(workersOf(this.s, this.game.me).map((w) => w.id)) }; this.menu = null; this.view.buildMode = null; this.renderPanel(true); };
     $('#b-idle').onclick = () => {
       if (!this.running) return;
@@ -264,6 +277,7 @@ export class UI {
     const s = this.s, me = this.me;
     this.setT('r-food', String(Math.floor(me.res.food))); this.setT('r-water', String(Math.floor(me.res.water)));
     this.setT('r-stone', String(Math.floor(me.res.stone))); this.setT('r-bbd', String(Math.floor(me.res.bbd)));
+    this.setT('r-bbd-rate', `+${Math.round(DUES * owned(s, me.id) * 60)}/min`);
     this.setT('r-pop', `${workersOf(s, me.id).length}/${popCap(s, me.id)}`);
     this.setT('s-age', me.age === 1 ? (me.ageT >= 0 ? `Co-op Age in ${Math.ceil(AGE_T - me.ageT)}s` : 'Village Age') : 'Co-op Age');
     const left = s.weather.nextHurr - s.time;
@@ -294,6 +308,15 @@ export class UI {
   }
 
   // ---------- start / end
+  private bindStart() {
+    document.querySelectorAll<HTMLButtonElement>('#difficulty .seg-b').forEach((b) => {
+      b.onclick = () => {
+        this.difficulty = b.dataset.d as Difficulty;
+        document.querySelectorAll<HTMLButtonElement>('#difficulty .seg-b').forEach((o) => { o.classList.toggle('on', o === b); o.setAttribute('aria-checked', String(o === b)); });
+      };
+    });
+    $('#start').onclick = () => this.onStart(this.difficulty);
+  }
   start() { $('#overlay').hidden = true; this.running = true; this.game.paused = false; this.renderPanel(true); }
   private end() {
     this.running = false;
@@ -305,6 +328,6 @@ export class UI {
       <ul><li><strong>${Math.floor(me.stats.food)}</strong> food grown and gathered</li><li><strong>${workersOf(s, me.id).length}</strong> workers, <strong>${Object.values(s.buildings).filter((b) => b.owner === me.id && b.done).length}</strong> buildings standing</li><li><strong>${s.weather.hurrIdx}</strong> hurricanes weathered</li></ul>
       <button class="btn primary" id="start">Play again</button>`;
     $('#overlay').hidden = false;
-    $('#start').onclick = () => this.onRestart();
+    $('#start').onclick = () => this.onStart(this.difficulty);
   }
 }

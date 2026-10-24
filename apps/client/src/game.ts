@@ -1,4 +1,4 @@
-import { DT, applyCommand, createGame, step, type CmdResult, type Command, type GameEvent, type Mode, type State } from '@bim/sim';
+import { DT, applyCommand, createGame, step, type CmdResult, type Command, type Difficulty, type GameEvent, type Mode, type State } from '@bim/sim';
 
 /**
  * The client talks to a game through this interface. LocalGame runs the simulation in the browser;
@@ -24,9 +24,9 @@ export class LocalGame implements GameSession {
   private prev = new Map<number, { x: number; y: number }>();
   private lastSeq = 0;
 
-  constructor(opts: { seed?: number; mode?: Mode; players?: number } = {}) {
+  constructor(opts: { seed?: number; mode?: Mode; players?: number; difficulty?: Difficulty } = {}) {
     const n = opts.players ?? 1;
-    this.state = createGame({ seed: opts.seed ?? (Date.now() % 2147483647), mode: opts.mode ?? 'coop', players: Array.from({ length: n }, (_, k) => ({ name: k === 0 ? 'You' : `Player ${k + 1}` })) });
+    this.state = createGame({ seed: opts.seed ?? (Date.now() % 2147483647), mode: opts.mode ?? 'coop', difficulty: opts.difficulty ?? 'normal', players: Array.from({ length: n }, (_, k) => ({ name: k === 0 ? 'You' : `Player ${k + 1}` })) });
   }
   get alpha() { return Math.min(1, this.acc / DT); }
   send(c: Command): CmdResult { return applyCommand(this.state, this.me, c); }

@@ -25,7 +25,7 @@ export const BT: Record<BType, BDef> = {
   depot: { name: 'Co-op Depot', w: 1, h: 1, cost: { stone: 60 }, hp: 300, drop: true, build: 14, desc: 'Workers drop off resources here, so trips are shorter.' },
   cistern: { name: 'Cistern', w: 1, h: 1, cost: { stone: 50, bbd: 20 }, hp: 250, build: 12, desc: 'Catches rain: +0.5 water/s. Dry in a drought.' },
   seawall: { name: 'Seawall', w: 1, h: 1, cost: { stone: 80 }, hp: 600, coast: true, build: 16, desc: 'Shields buildings within 5 tiles from hurricanes. Coast tiles only.' },
-  market: { name: 'Market', w: 1, h: 1, cost: { stone: 100, bbd: 40 }, hp: 350, build: 18, desc: 'Sell surplus food and stone, or truck in water.' },
+  market: { name: 'Market', w: 1, h: 1, cost: { stone: 80 }, hp: 350, build: 18, desc: 'Sell surplus food and stone at the best prices, or truck in water.' },
   aqua: { name: 'Aquaponics', w: 1, h: 1, age: 2, cost: { stone: 120, bbd: 80 }, hp: 300, build: 22, desc: 'Fish and greens together: +2 food/s, uses 0.5 water/s. Half speed without solar nearby.' },
   solar: { name: 'Solar Array', w: 1, h: 1, age: 2, cost: { stone: 60, bbd: 100 }, hp: 200, build: 14, desc: 'Powers aquaponics within 5 tiles.' },
   hq: { name: 'AgroCorp HQ', w: 2, h: 2, cost: {}, hp: 9999, build: 1, desc: '' },
@@ -33,7 +33,22 @@ export const BT: Record<BType, BDef> = {
 export const BUILD_LIST: BType[] = ['house', 'farm', 'depot', 'cistern', 'seawall', 'market', 'aqua', 'solar'];
 export const AGE_COST: Cost = { food: 400, water: 150, stone: 200, bbd: 150 };
 export const TRAIN_COST: Cost = { food: 50 };
-export const START_RES: Record<Res, number> = { food: 200, water: 100, stone: 120, bbd: 60 };
+export const START_RES: Record<Res, number> = { food: 200, water: 100, stone: 120, bbd: 100 };
+/** BBD per second each parish you feed pays in co-op dues. */
+export const DUES = 0.5;
+/** Selling at the Town Centre's roadside stall: always available, worse rate than the Market. */
+export const STALL = { food: 50, bbd: 20 };
+
+export type Difficulty = 'easy' | 'normal' | 'hard';
+/**
+ * AgroCorp tuning. grace: seconds before it starts spending. rate: income multiplier.
+ * growth: extra income per parish it holds. warnAt: share of the price saved before it announces its target.
+ */
+export const DIFFICULTY: Record<Difficulty, { label: string; grace: number; rate: number; growth: number; warnAt: number }> = {
+  easy: { label: 'Easy', grace: 360, rate: 0.55, growth: 0.15, warnAt: 0.6 },
+  normal: { label: 'Normal', grace: 240, rate: 0.8, growth: 0.2, warnAt: 0.7 },
+  hard: { label: 'Hard', grace: 120, rate: 1.1, growth: 0.25, warnAt: 0.8 },
+};
 
 export const HNAMES = ['Arlo', 'Bree', 'Cosmo', 'Della', 'Ezra', 'Fern', 'Gus', 'Hana', 'Ivo', 'Jules'];
 

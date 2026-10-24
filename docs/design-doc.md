@@ -223,6 +223,14 @@ Up to **4 players** online, alongside single-player:
 - The game moves out of the single-file prototype into a GitHub repo, with the game logic, the drawing and the server as separate parts.
 - Multiplayer gets built **early**, straight after the move. Every later feature (crops, aquaponics, hurricanes) is then built multiplayer-ready from the start, because adding multiplayer to a finished game is far harder.
 
+## 14b. Decisions since v0.3
+
+- **Seaport and airport are shared landmarks.** Any player whose land connects to them by road can use them; whoever holds that parish collects a small fee on each shipment.
+- **Roads in gameplay:** workers move twice as fast on roads, deliveries to parishes travel by road, and players can build their own road tiles.
+- **Player dashboard approved:** stockpiles with income rates, parish status badges, worker summary, threats, AgroCorp progress, and in multiplayer the other players and trade offers.
+- **AgroCorp difficulty (Easy / Normal / Hard),** chosen on the start screen. It waits out a grace period (6 / 4 / 2 minutes), only buys parishes next to its own land, and announces its target before buying.
+- **Money:** start with 100 BBD; co-op dues are 0.5 BBD/s per parish; a roadside stall at the Town Centre sells 50 food for 20 BBD at any time; the Market costs 80 stone and gives better prices. Tapping the BBD counter explains all of this in the game.
+
 ## 15. Build plan
 
 1. ✅ **Real map:** coastline, parishes, terrain and towns.

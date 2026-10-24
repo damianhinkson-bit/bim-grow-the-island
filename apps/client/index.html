@@ -15,7 +15,7 @@
     <span class="chip"><span class="dot d-food"></span><b id="r-food">0</b></span>
     <span class="chip"><span class="dot d-water"></span><b id="r-water">0</b></span>
     <span class="chip"><span class="dot d-stone"></span><b id="r-stone">0</b></span>
-    <span class="chip"><span class="dot d-bbd"></span><b id="r-bbd">0</b>&nbsp;BBD</span>
+    <button class="chip chip-btn" id="c-bbd" aria-label="Money: how to earn BBD"><span class="dot d-bbd"></span><b id="r-bbd">0</b>&nbsp;BBD <span class="rate" id="r-bbd-rate"></span></button>
     <span class="chip"><span class="dot d-pop"></span><b id="r-pop">0</b></span>
   </div>
   <div class="row">
@@ -48,9 +48,16 @@
       <li><strong>Tap a worker</strong>, then tap breadfruit, coral stone, a spring or flying fish to gather.</li>
       <li><strong>Build</strong> chattel houses, farm plots, cisterns and seawalls in your parishes.</li>
       <li><strong>Tap a parish</strong> next to yours to feed it and win it over.</li>
+      <li><strong>Money (BBD)</strong> comes from co-op dues in every parish you feed, and from selling food at your Town Centre.</li>
       <li>Hurricanes hit every few minutes. <strong>Seawalls</strong> shield nearby buildings.</li>
       <li>Drag to pan. Pinch or scroll to zoom.</li>
     </ul>
+    <div class="kicker">AgroCorp difficulty</div>
+    <div class="seg" id="difficulty" role="radiogroup" aria-label="AgroCorp difficulty">
+      <button class="seg-b" role="radio" aria-checked="false" data-d="easy">Easy<small>Slow, lots of warning</small></button>
+      <button class="seg-b on" role="radio" aria-checked="true" data-d="normal">Normal<small>A fair race</small></button>
+      <button class="seg-b" role="radio" aria-checked="false" data-d="hard">Hard<small>Buys fast</small></button>
+    </div>
     <button class="btn primary" id="start">Start growing</button>
     <p class="credit">Parish borders: geoBoundaries / Wikimedia Commons, CC BY 2.5.</p>
   </div>

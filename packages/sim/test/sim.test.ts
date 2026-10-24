@@ -86,3 +86,23 @@ describe('simulation', () => {
     expect(owned(s, 'p1')).toBe(2);
   });
 });
+
+describe('AgroCorp and money', () => {
+  it('waits out its grace period, warns about its target, then buys it', () => {
+    const s = createGame({ players: [{ name: 'A' }], difficulty: 'normal' });
+    let warnAt = -1, buyAt = -1;
+    for (let t = 0; t < 20000 && buyAt < 0; t++) {
+      step(s);
+      if (warnAt < 0 && s.events.some((e) => e.kind === 'warn' && e.msg.startsWith('AgroCorp is about to'))) warnAt = s.time;
+      if (owned(s, AGRO) > 1) buyAt = s.time;
+    }
+    expect(warnAt).toBeGreaterThan(240);
+    expect(buyAt).toBeGreaterThan(warnAt + 10);
+  });
+  it('lets a player sell food at the Town Centre stall without a Market', () => {
+    const s = createGame({ players: [{ name: 'A' }] });
+    expect(applyCommand(s, 'p1', { type: 'market', trade: 'stall-food' }).ok).toBe(true);
+    expect(s.players[0].res).toMatchObject({ food: 150, bbd: 120 });
+    expect(applyCommand(s, 'p1', { type: 'market', trade: 'sell-food' }).ok).toBe(false);
+  });
+});
