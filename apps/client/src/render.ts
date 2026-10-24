@@ -1,5 +1,5 @@
 import { Application, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
-import { H, SEA_R, TOWNS, W, drought, placeBlock, roadNetwork, type BType, type State } from '@bim/sim';
+import { H, SEA_R, TOWNS, W, drought, placeBlock, player, roadNetwork, roadOwner, type BType, type State } from '@bim/sim';
 import type { GameSession } from './game';
 import { buildingTex, nodeTex, workerTex } from './sprites';
 import { T, bakeOwnership, bakeTerrain } from './terrain';
@@ -28,7 +28,8 @@ export class Renderer {
   private own!: Sprite;
   private below = new Graphics();
   private roadG = new Graphics();
-  private roadVer = -1;
+  private roadVer = '';
+  private particles: { x: number; y: number; vx: number; vy: number; life: number; c: number }[] = [];
   private landmarkLabels: { type: 'port' | 'airport'; t: Text }[] = [];
   private nodesL = new Container();
   private bldL = new Container();
@@ -81,7 +82,7 @@ export class Renderer {
     this.agroLabel = label('AGROCORP', 9.5);
     this.landmarkLabels.forEach((l) => l.t.destroy());
     this.landmarkLabels = (['port', 'airport'] as const).map((type) => ({ type, t: label(type === 'port' ? 'PORT' : 'AIRPORT', 9.5) }));
-    this.roadVer = -1;
+    this.roadVer = '';
     this.overlay.addChild(this.fx);
   }
 
@@ -107,7 +108,9 @@ export class Renderer {
     if (s.parishVersion !== this.ownVer) {
       bakeOwnership(s, this.TS, this.ownCanvas); this.own.texture.source.update(); this.ownVer = s.parishVersion;
     }
-    if (s.roadVersion !== this.roadVer) { this.drawRoads(s); this.roadVer = s.roadVersion; }
+    const rv = `${s.roadVersion}:${s.players.map((p) => p.age).join('')}`;
+    if (rv !== this.roadVer) { this.drawRoads(s); this.roadVer = rv; }
+    this.tickParticles(dt);
     this.drawBelow(s, view, game);
     this.syncNodes(s);
     this.syncBuildings(s);
@@ -150,36 +153,54 @@ export class Renderer {
       g.circle((b.x + 0.5) * T, (b.y + 0.5) * T, SEA_R * T).fill({ color: 0x5bc0eb, alpha: 0.08 }).stroke({ width: 1.5, color: 0x5bc0eb, alpha: 0.85 });
   }
 
-  /** Roads players have built: a coral-stone track joining neighbouring road tiles. Highways are painted into the terrain. */
+  /** Roads players have built, styled by the builder's age: dirt tracks, then coral stone, then paved. Highways are painted into the terrain. */
   private drawRoads(s: State) {
     const g = this.roadG; g.clear();
     const R = (i: number) => s.roads[i] > 0;
-    for (let i = 0; i < W * H; i++) {
-      if (s.roads[i] !== 2) continue;
-      const x = (i % W) + 0.5, y = ((i / W) | 0) + 0.5;
+    const styles = [
+      { test: (a: number) => a <= 2, edge: 0x5c4326, top: 0xc9a66b, w: 0.15 },
+      { test: (a: number) => a === 3, edge: 0x3c301c, top: 0xeadfbe, w: 0.17 },
+      { test: (a: number) => a >= 4, edge: 0x22252a, top: 0x4a4f57, w: 0.2 },
+    ];
+    const links = (i: number, fn: (x0: number, y0: number, x1: number, y1: number) => void) => {
+      const tx = i % W, ty = (i / W) | 0, x = tx + 0.5, y = ty + 0.5;
       for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [1, -1], [-1, 0], [0, -1], [-1, -1], [-1, 1]]) {
-        const nx = (i % W) + dx, ny = ((i / W) | 0) + dy;
+        const nx = tx + dx, ny = ty + dy;
         if (nx < 0 || ny < 0 || nx >= W || ny >= H || !R(ny * W + nx)) continue;
         // join diagonally only when there's no straight route round the corner
-        if (dx && dy && (R(((i / W) | 0) * W + nx) || R(ny * W + (i % W)))) continue;
-        g.moveTo(x * T, y * T).lineTo((x + dx * 0.5) * T, (y + dy * 0.5) * T);
+        if (dx && dy && (R(ty * W + nx) || R(ny * W + tx))) continue;
+        fn(x * T, y * T, (x + dx * 0.5) * T, (y + dy * 0.5) * T);
+      }
+    };
+    for (const st of styles) {
+      const tiles: number[] = [];
+      for (let i = 0; i < W * H; i++) if (s.roads[i] >= 2 && st.test(roadOwner(s, i)?.age ?? 3)) tiles.push(i);
+      if (!tiles.length) continue;
+      for (const i of tiles) links(i, (a, b, c, d) => g.moveTo(a, b).lineTo(c, d));
+      g.stroke({ width: (st.w * 2) * T, color: st.edge, alpha: 0.3, cap: 'round' });
+      for (const i of tiles) g.circle((i % W + 0.5) * T, ((i / W | 0) + 0.5) * T, st.w * T);
+      g.fill({ color: st.top });
+      for (const i of tiles) links(i, (a, b, c, d) => g.moveTo(a, b).lineTo(c, d));
+      g.stroke({ width: st.w * 2 * T, color: st.top, cap: 'round' });
+    }
+  }
+
+  /** A burst of flag-coloured confetti from each of a player's buildings, for an age-up. */
+  celebrate(s: State, owner: string) {
+    const cols = [0x00267f, 0xffc726, 0x6cc24a, 0xffffff];
+    for (const b of Object.values(s.buildings)) {
+      if (b.owner !== owner || !b.done) continue;
+      const cx = (b.x + b.w / 2) * T, cy = (b.y + b.h / 2) * T;
+      for (let k = 0; k < 14; k++) {
+        const a = Math.random() * Math.PI * 2, v = 30 + Math.random() * 60;
+        this.particles.push({ x: cx, y: cy, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 50, life: 1.6 + Math.random() * 0.8, c: cols[k % cols.length] });
       }
     }
-    g.stroke({ width: 0.34 * T, color: 0x3c301c, alpha: 0.3, cap: 'round' });
-    for (let i = 0; i < W * H; i++) if (s.roads[i] === 2) g.circle((i % W + 0.5) * T, ((i / W | 0) + 0.5) * T, 0.17 * T);
-    g.fill({ color: 0xeadfbe });
-    for (let i = 0; i < W * H; i++) {
-      if (s.roads[i] !== 2) continue;
-      const x = (i % W) + 0.5, y = ((i / W) | 0) + 0.5;
-      for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [1, -1], [-1, 0], [0, -1], [-1, -1], [-1, 1]]) {
-        const nx = (i % W) + dx, ny = ((i / W) | 0) + dy;
-        if (nx < 0 || ny < 0 || nx >= W || ny >= H || !R(ny * W + nx)) continue;
-        // join diagonally only when there's no straight route round the corner
-        if (dx && dy && (R(((i / W) | 0) * W + nx) || R(ny * W + (i % W)))) continue;
-        g.moveTo(x * T, y * T).lineTo((x + dx * 0.5) * T, (y + dy * 0.5) * T);
-      }
-    }
-    g.stroke({ width: 0.17 * T, color: 0xeadfbe, cap: 'round' });
+  }
+  private tickParticles(dt: number) {
+    if (RM) { this.particles = []; return; }
+    for (const p of this.particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 90 * dt; p.vx *= 0.98; p.life -= dt; }
+    this.particles = this.particles.filter((p) => p.life > 0);
   }
 
   private syncNodes(s: State) {
@@ -200,7 +221,7 @@ export class Renderer {
     for (const b of Object.values(s.buildings)) {
       seen.add(b.id);
       let sp = this.bSpr.get(b.id);
-      const tex = buildingTex(b.type, b.variant, { dry: b.type === 'cistern' && dry, foundation: !b.done });
+      const tex = buildingTex(b.type, b.variant, { dry: b.type === 'cistern' && dry, foundation: !b.done, age: player(s, b.owner)?.age ?? 3 });
       if (!sp) { sp = new Sprite(tex); this.bldL.addChild(sp); this.bSpr.set(b.id, sp); }
       if (sp.texture !== tex) sp.texture = tex;
       sp.width = b.w * T; sp.height = b.h * T; sp.position.set(b.x * T, b.y * T); sp.zIndex = b.y;
@@ -213,10 +234,10 @@ export class Renderer {
     for (const w of Object.values(s.workers)) {
       seen.add(w.id);
       let sp = this.wSpr.get(w.id);
-      if (!sp) {
-        const col = s.players.find((p) => p.id === w.owner)?.color ?? '#ffffff';
-        sp = new Sprite(workerTex(col)); sp.anchor.set(0.5, 0.6); sp.width = 16; sp.height = 20; this.wrkL.addChild(sp); this.wSpr.set(w.id, sp);
-      }
+      const owner = player(s, w.owner), tex = workerTex(owner?.color ?? '#ffffff', owner?.age ?? 3);
+      if (!sp) { sp = new Sprite(tex); sp.anchor.set(0.5, 0.6); this.wrkL.addChild(sp); this.wSpr.set(w.id, sp); }
+      if (sp.texture !== tex) sp.texture = tex;
+      sp.width = 16; sp.height = 20;
       const p = game.prevPos(w.id) ?? w;
       const x = p.x + (w.x - p.x) * a, y = p.y + (w.y - p.y) * a;
       const moving = !!w.path?.length, bob = moving && !RM ? Math.sin(this.time * 14 + w.id) * 1.2 : 0;
@@ -259,6 +280,7 @@ export class Renderer {
       }
       if (w.amt >= 1) g.circle(x - (w.face || 1) * 5, y - 3, 3).fill(w.carry === 'food' ? 0x6cc24a : w.carry === 'water' ? 0x5bc0eb : 0xe7e0cc).stroke({ width: 1, color: 0x000000, alpha: 0.4 });
     }
+    for (const p of this.particles) g.rect(p.x - 1.6, p.y - 1.6, 3.2, 3.2).fill({ color: p.c, alpha: Math.min(1, p.life * 1.5) });
     for (const m of view.marks) g.circle(m.x * T, m.y * T, (1 - m.t / 0.7) * 10 + 4).stroke({ width: 2, color: 0xffc726, alpha: m.t / 0.7 });
     void game;
   }

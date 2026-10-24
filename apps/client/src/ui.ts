@@ -1,5 +1,5 @@
 import {
-  AGE_COST, AGE_T, AGRO, AGRO_HOME, BOAT_COST, BOAT_RATE, BT, BUILD_LIST, DEALS, DUES, MAX_BOATS, NT, RELIEF, ROAD_COST, STALL, TOURISM, TRAIN, W,
+  AGES, AGRO, AGRO_HOME, MAX_AGE, BOAT_COST, BOAT_RATE, BT, BUILD_LIST, DEALS, DUES, MAX_BOATS, NT, RELIEF, ROAD_COST, STALL, TOURISM, TRAIN, W,
   airportOpen, aquaPowered, canAfford, claimBlock, claimCost, dealTerms, drought, fmtCost, landmarkHolder, linked, owned,
   parishBuilt, player, popCap, protectedB, rivalCost, tcOf, teamOwned, winTarget, workersOf,
   type BType, type Command, type DealId, type Difficulty, type Landmark, type State, type Worker,
@@ -26,13 +26,16 @@ export class UI {
   private dashOpen = false;
   private dashT = 0;
   private lastDash = '';
+  private seenAge = 1;
+  private bannerT = 0;
+  storyShown = false;
   private mini = $<HTMLCanvasElement>('#mini');
   running = false;
 
   constructor(private game: GameSession, private r: Renderer, private onStart: (d: Difficulty) => void) {
     this.bindPanel(); this.bindBar(); this.bindInput(); this.bindKeys(); this.bindStart(); this.bindDash();
   }
-  setGame(game: GameSession) { this.flows.reset(); this.closeDash(); this.game = game; this.view = { sel: null, buildMode: null, marks: [], roadMode: false, roadDraft: new Set() }; this.menu = null; this.lastPanel = ''; this.hudCache = {}; }
+  setGame(game: GameSession) { this.seenAge = 1; this.storyShown = false; this.flows.reset(); this.closeDash(); this.game = game; this.view = { sel: null, buildMode: null, marks: [], roadMode: false, roadDraft: new Set() }; this.menu = null; this.lastPanel = ''; this.hudCache = {}; }
 
   private get s(): State { return this.game.state; }
   private get me() { return player(this.s, this.game.me)!; }
@@ -55,6 +58,8 @@ export class UI {
     this.view.marks = this.view.marks.filter((m) => m.t > 0);
     for (const e of this.game.newEvents()) this.toast(e.msg, e.kind === 'info' ? undefined : e.kind);
     this.hud();
+    if (this.me.age > this.seenAge) { this.seenAge = this.me.age; this.ageUp(); }
+    if (this.bannerT > 0) { this.bannerT -= dt; if (this.bannerT <= 0) $('#ageBanner').hidden = true; }
     this.flows.sample(this.s, this.game.me);
     if (this.dashOpen) { this.dashT -= dt; if (this.dashT <= 0) { this.dashT = 0.5; this.renderDash(); } }
     this.panelT -= dt; if (this.panelT <= 0) { this.panelT = 0.25; this.renderPanel(); }
@@ -158,7 +163,7 @@ export class UI {
     if (this.menu === 'build') {
       return `<h3>Build</h3><p>Costs come out when you place it. Selected or idle workers go build it.</p><div class="grid2">${this.btn('roadmode', 'Road', `${ROAD_COST} stone a tile`, { disabled: me.res.stone < ROAD_COST })}${BUILD_LIST.map((k) => {
         const d = BT[k], locked = (d.age ?? 1) > me.age;
-        return this.btn('place:' + k, d.name, locked ? 'Co-op Age' : fmtCost(d.cost), { disabled: locked || !canAfford(me.res, d.cost) });
+        return this.btn('place:' + k, d.name, locked ? `${AGES[(d.age ?? 1) - 1].short} Age` : fmtCost(d.cost), { disabled: locked || !canAfford(me.res, d.cost) });
       }).join('')}</div>`;
     }
     if (!sel) return `<h3>Grow the island</h3><p>Goal: feed <strong>${winTarget(s)} parishes</strong> and reach the <strong>Co-op Age</strong>. Tap a worker, then tap breadfruit, coral stone, a spring or fish. Tap any parish to see it.</p>`;
@@ -184,7 +189,11 @@ export class UI {
         info = `Trains workers. ${b.queue ? `Training ${b.queue} (next in ${Math.ceil(TRAIN - b.trainT)}s${workersOf(s, me.id).length >= popCap(s, me.id) ? ', needs a house' : ''}).` : ''}`;
         btns += this.btn('train', 'Train worker', '50 food', { primary: true, disabled: me.res.food < 50 || b.queue >= 5 });
         btns += this.btn('stall-food', `Sell ${STALL.food} food`, `+${STALL.bbd} BBD`, { disabled: me.res.food < STALL.food });
-        if (me.age === 1) btns += me.ageT >= 0 ? this.btn('noop', 'Advancing…', `${Math.ceil(AGE_T - me.ageT)}s left`, { disabled: true }) : this.btn('age', 'Co-op Age', fmtCost(AGE_COST), { disabled: !canAfford(me.res, AGE_COST) });
+        if (me.age < MAX_AGE) {
+          const next = AGES[me.age];
+          btns += me.ageT >= 0 ? this.btn('noop', `Entering ${next.short} Age…`, `${Math.ceil(next.time - me.ageT)}s left`, { disabled: true })
+            : this.btn('age', `Advance to ${next.short} Age`, `${fmtCost(next.cost)} · unlocks ${next.unlocks.charAt(0).toLowerCase()}${next.unlocks.slice(1)}`, { disabled: !canAfford(me.res, next.cost) });
+        }
       }
       if (b.type === 'market' && mine) btns += this.btn('sell-food', 'Sell 100 food', '+50 BBD', { disabled: me.res.food < 100 }) + this.btn('sell-stone', 'Sell 100 stone', '+40 BBD', { disabled: me.res.stone < 100 }) + this.btn('buy-water', 'Truck in 100 water', '50 BBD', { disabled: me.res.bbd < 50 });
       if (b.type === 'farm') info = `${b.worker !== null ? 'Being farmed.' : 'No farmer. Select a worker and tap this plot.'}${b.pest > 0 ? ` Pests: ${Math.ceil(b.pest)}s left.` : ''}${me.res.water < 1 ? ' Out of water, so growth is slow.' : ''}`;
@@ -345,7 +354,8 @@ export class UI {
     this.setT('r-stone', String(Math.floor(me.res.stone))); this.setT('r-bbd', String(Math.floor(me.res.bbd)));
     this.setT('r-bbd-rate', `+${Math.round(DUES * owned(s, me.id) * 60)}/min`);
     this.setT('r-pop', `${workersOf(s, me.id).length}/${popCap(s, me.id)}`);
-    this.setT('s-age', me.age === 1 ? (me.ageT >= 0 ? `Co-op Age in ${Math.ceil(AGE_T - me.ageT)}s` : 'Village Age') : 'Co-op Age');
+    const nextAge = AGES[me.age];
+    this.setT('s-age', me.ageT >= 0 && nextAge ? `${nextAge.short} Age in ${Math.ceil(nextAge.time - me.ageT)}s` : `${AGES[me.age - 1].name} · ${me.age}/${MAX_AGE}`);
     const left = s.weather.nextHurr - s.time;
     this.setT('s-hurr', s.weather.stormT > 0 ? 'Hurricane!' : `Hurricane ${fmtT(left)}`);
     $('#s-hurr').classList.toggle('warn', left < 60 || s.weather.stormT > 0);
@@ -413,6 +423,21 @@ export class UI {
       }
       if (best >= 0) this.send({ type: 'gather', workers: [w.id], node: best });
     }
+  }
+
+  // ---------- age-up moment
+  private ageUp() {
+    const a = AGES[this.me.age - 1];
+    this.r.celebrate(this.s, this.game.me);
+    const el = $('#ageBanner');
+    el.innerHTML = `<div class="kicker">Age ${this.me.age} of ${MAX_AGE}</div><div class="ab-title">${a.name}</div><div class="ab-sub">${a.unlocks}</div>`;
+    el.hidden = false; this.bannerT = 4;
+    if (this.me.age === 3 && !this.storyShown) { this.storyShown = true; setTimeout(() => this.showStory(), 1400); }
+  }
+  /** The Recovery Age opens with a short history card. The game pauses while it's open. */
+  private showStory() {
+    const card = $('#story'); card.hidden = false; this.game.paused = true;
+    $('#story-go').onclick = () => { card.hidden = true; this.game.paused = false; $('#b-pause').textContent = 'Pause'; $('#b-pause').classList.remove('on'); };
   }
 
   // ---------- start / end

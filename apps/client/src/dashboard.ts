@@ -1,5 +1,5 @@
 import {
-  AGRO, BOAT_RATE, BT, DIFFICULTY, DUES, EAT, MAX_BOATS, NT, RES, STALL, TOURISM, TRAIN, airportOpen, drought, landmarkHolder, linked, owned, parishBuilt, player, popCap,
+  AGES, AGRO, BOAT_RATE, BT, MAX_AGE, fmtCost, DIFFICULTY, DUES, EAT, MAX_BOATS, NT, RES, STALL, TOURISM, TRAIN, airportOpen, drought, landmarkHolder, linked, owned, parishBuilt, player, popCap,
   resourcesOnLand, rivalCost, roadNetwork, tcOf, workersOf,
   type Flow, type Res, type State,
 } from '@bim/sim';
@@ -55,6 +55,13 @@ export function dashboardHTML(s: State, me: string, tr: FlowTracker): string {
   }).join('');
   const stock = `<section class="dcard"><h4>Stockpiles</h4><div class="tw"><table class="dt"><thead><tr><th></th><th>Stock</th><th>In/min</th><th>Use/min</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
     <p class="hint">Use counts eating and running costs (farms and aquaponics drink water). Building costs aren't included.</p></section>`;
+  // ---------- age
+  const next = AGES[p.age];
+  const ageCard = `<section class="dcard"><h4>Age <span class="pill good">${p.age} of ${MAX_AGE}</span></h4>
+    <div class="big" style="font-size:24px">${AGES[p.age - 1].name}</div>
+    <div class="ages">${AGES.map((a, k) => `<span class="${k < p.age ? 'done' : ''}" title="${a.name}">${a.short}</span>`).join('')}</div>
+    ${next ? `<p class="hint">Next: <strong>${next.name}</strong>, at your Town Centre. Costs ${fmtCost(next.cost)} and takes ${next.time}s. Unlocks ${next.unlocks.charAt(0).toLowerCase()}${next.unlocks.slice(1)}</p>` : '<p class="hint">You have reached the final age. Feed enough parishes to win.</p>'}
+  </section>`;
   // ---------- people
   const houses = Object.values(s.buildings).filter((b) => b.owner === me && b.type === 'house');
   const doneH = houses.filter((b) => b.done).length, tc = tcOf(s, me);
@@ -133,5 +140,5 @@ export function dashboardHTML(s: State, me: string, tr: FlowTracker): string {
       <dt>Pests</dt><dd>${pests ? `${pests} farm${pests > 1 ? 's' : ''} hit` : 'none'}</dd>
     </dl></section>`;
   const sell = p.res.food >= STALL.food && tc ? `<button class="btn" data-act="stall-food">Sell ${STALL.food} food<small>+${STALL.bbd} BBD</small></button>` : '';
-  return `<div class="dgrid">${food}${people}${stock}${workers}${landHTML}${trade}${blds}${pars}${threats}</div>${sell ? `<div class="btns dfoot">${sell}</div>` : ''}`;
+  return `<div class="dgrid">${food}${ageCard}${people}${stock}${workers}${landHTML}${trade}${blds}${pars}${threats}</div>${sell ? `<div class="btns dfoot">${sell}</div>` : ''}`;
 }

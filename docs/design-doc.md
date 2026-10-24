@@ -115,7 +115,7 @@ An aquaponics system is one building with its own panel, showing three gauges an
 
 **How the Recovery Age handles history:** it opens with a short illustrated card about Barbados's sugar-cane monoculture years. The card shows how that history left depleted soils and an island dependent on imports, and it acknowledges the people who worked that land. Then the gameplay is entirely about restoring the land. There are no plantation mechanics and no reward for running a monoculture.
 
-**[decide]** Five ages could make the game long. Ages 1 and 2 might be merged into a quicker opening.
+Decided: keep all five ages (see 14b).
 
 ## 9. Parishes and food security
 
@@ -235,6 +235,9 @@ Up to **4 players** online, alongside single-player:
 - **Dashboard built:** opened from the bottom bar. It shows food in and out with how long the stock lasts, stockpiles with per-minute rates, housing, worker jobs, resources left on your land, buildings, parish protection, AgroCorp's next target and upcoming threats.
 
 - **Roads, port and airport built.** Highways are road tiles; workers move twice as fast on them and route along them. Players lay road tiles in their own parishes by dragging (5 coral stone each). Bridgetown Port (St. Michael): export 100 food for 60 BBD or 100 stone for 50, import 100 food for 80 or 100 water for 40, up to 3 fishing boats (60 stone + 40 BBD, 24 food/min each, can sink in hurricanes), and a relief ship with 80 food after each hurricane. Grantley Adams Airport (Christ Church): air-freight 50 food for 45 BBD, tourism worth 18 BBD/min to the parish holder, closed from the hurricane warning until the storm passes. A player can trade only once their Town Centre, a Depot or a Market connects to the landmark by road; the parish holder takes 10% of each deal's BBD, including AgroCorp.
+
+- **All five ages built** (decided: no merging). Costs to enter each age: Rain-fed Farming 150 food + 50 stone (20 s); Recovery 300 food, 100 water, 150 stone, 80 BBD (30 s); Sustainable Tech 400 food, 150 water, 200 stone, 150 BBD (40 s); Co-op 600 food, 200 water, 300 stone, 300 BBD (50 s). Unlocks: Foraging has huts and depots; Rain-fed Farming adds farm plots, cisterns, the market and seawalls; Recovery adds the Composter (farms within 3 tiles +40%) and Windbreak (inland hurricane shield, 3 tiles); Sustainable Tech adds aquaponics and solar; Co-op adds the Co-op Hub (drop-off, +50% dues). Winning needs the Co-op Age.
+- **Each age has its own look** for a player's Town Centre, houses, farms, depots, roads and workers: thatch and dirt tracks, then timber and galvanised roofs, then painted chattel houses and coral-stone roads, then solar roofs and paved roads, then the Co-op Hall and two-storey verandah houses. Age-ups fire a confetti burst and a banner. The Recovery Age opens with the "cane years" history card, and the game pauses while it is open.
 
 ## 15. Build plan
 
