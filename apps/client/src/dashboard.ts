@@ -132,6 +132,16 @@ export function dashboardHTML(s: State, me: string, tr: FlowTracker): string {
       ${landmarkHolder(s, 'airport') === me ? `<dt>Tourism</dt><dd>${airportOpen(s) ? `+${Math.round(TOURISM * 60)} BBD/min` : 'airport closed'}</dd>` : ''}
       <dt>Road tiles built</dt><dd>${myRoads}</dd>
     </dl><p class="hint">Tap the port or airport on the map to trade. Your Town Centre, a Depot or a Market must connect to it by road.</p></section>`;
+  // ---------- other players (online) and trade offers
+  const others = s.players.filter((q) => q.id !== me);
+  const incoming = s.offers.filter((o) => o.to === me), outgoing = s.offers.filter((o) => o.from === me);
+  const offerTxt = (o: typeof s.offers[number]) => `${fmtCost(o.give) || 'nothing'} for ${fmtCost(o.get) || 'nothing'}`;
+  const playersCard = others.length ? `<section class="dcard"><h4>Players ${incoming.length ? `<span class="pill warn">${incoming.length} offer${incoming.length > 1 ? 's' : ''}</span>` : ''}</h4>
+    ${incoming.map((o) => { const f = player(s, o.from); return `<div class="offer"><p><strong style="color:${f?.color}">${f?.name}</strong> offers ${offerTxt(o)}. <span class="muted">${Math.max(0, Math.ceil(60 - (s.time - o.t)))}s left</span></p><div class="btns"><button class="btn primary" data-act="answer:${o.id}:1">Accept</button><button class="btn" data-act="answer:${o.id}:0">Decline</button></div></div>`; }).join('')}
+    <ul class="plist">${others.map((q) => `<li><span><span class="sw" style="background:${q.color}"></span>${q.name}</span><span class="muted">${AGES[q.age - 1].short} · ${owned(s, q.id)} parish${owned(s, q.id) === 1 ? '' : 'es'}</span></li>
+      <li class="pbtns"><button class="btn" data-act="offer:${q.id}">Offer trade</button>${q.team === p.team ? `<button class="btn" data-act="gift:${q.id}">Send gift</button>` : ''}</li>`).join('')}</ul>
+    ${outgoing.length ? `<p class="hint">Waiting on: ${outgoing.map((o) => `${player(s, o.to)?.name} (${offerTxt(o)})`).join('; ')}</p>` : ''}
+  </section>` : '';
   // ---------- threats
   const pests = farms.filter((f) => f.pest > 0).length;
   const threats = `<section class="dcard"><h4>Threats</h4><dl class="kv">
@@ -140,5 +150,5 @@ export function dashboardHTML(s: State, me: string, tr: FlowTracker): string {
       <dt>Pests</dt><dd>${pests ? `${pests} farm${pests > 1 ? 's' : ''} hit` : 'none'}</dd>
     </dl></section>`;
   const sell = p.res.food >= STALL.food && tc ? `<button class="btn" data-act="stall-food">Sell ${STALL.food} food<small>+${STALL.bbd} BBD</small></button>` : '';
-  return `<div class="dgrid">${food}${ageCard}${people}${stock}${workers}${landHTML}${trade}${blds}${pars}${threats}</div>${sell ? `<div class="btns dfoot">${sell}</div>` : ''}`;
+  return `<div class="dgrid">${playersCard}${food}${ageCard}${people}${stock}${workers}${landHTML}${trade}${blds}${pars}${threats}</div>${sell ? `<div class="btns dfoot">${sell}</div>` : ''}`;
 }

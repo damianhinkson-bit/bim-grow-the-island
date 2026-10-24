@@ -120,3 +120,34 @@ body{background:var(--sea);color:var(--fg);font-family:var(--body);-webkit-user-
 #panel.tall{max-height:58vh}
 .btn.pressed{filter:brightness(1.25);transform:scale(.98)}
 .btn.primary.pressed{filter:brightness(.92)}
+/* start menu and lobby */
+.mtabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:4px 0 12px}
+.mtab{font:inherit;font-weight:800;font-size:15px;color:var(--fg);background:transparent;border:1px solid var(--line);border-radius:10px;padding:10px;cursor:pointer}
+.mtab.on{background:var(--panel2);border-color:var(--gold);color:var(--gold)}
+.mtab:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.mpane{display:flex;flex-direction:column;gap:8px}
+.field{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}
+.field input,.joinrow input,.trow input,.trow select{font:inherit;font-size:16px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--fg);background:#0B1A3F;border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:0}
+.field input:focus,.joinrow input:focus,.trow input:focus,.trow select:focus{outline:2px solid var(--gold);outline-offset:1px}
+.or{text-align:center;font-size:12px;color:var(--muted);margin:4px 0}
+.joinrow{display:grid;grid-template-columns:1fr auto;gap:6px}
+.joinrow #code{text-transform:uppercase;letter-spacing:4px;font-family:var(--display);font-size:22px;text-align:center}
+.joinrow .btn{text-align:center;width:auto}
+.bigcode{font-family:var(--display);font-size:52px;letter-spacing:10px;color:var(--gold);line-height:1;margin:2px 0 10px;font-variant-numeric:tabular-nums}
+.seats{list-style:none;padding:0;margin:10px 0 14px;display:flex;flex-direction:column;gap:6px}
+.seats li{display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px;padding:8px 10px;border-radius:10px;background:var(--panel2)}
+.seats li.empty{background:transparent;border:1px dashed var(--line);color:var(--muted)}
+.seats em{font-style:normal;color:var(--muted);font-weight:400}
+.seats .pill{margin-left:auto}
+.sw{display:inline-block;width:12px;height:12px;border-radius:4px;flex:none;margin-right:6px;vertical-align:-1px;border:1px solid rgba(255,255,255,.25)}
+.btn.ghost{background:transparent;margin-top:8px}
+.card .btn.ghost{width:100%}
+.note{margin:0 0 12px;padding:9px 11px;border-radius:10px;background:rgba(226,85,63,.18);border:1px solid rgba(226,85,63,.5);font-size:13.5px}
+.card .credit{text-align:center}
+/* trading */
+.trow{display:grid;grid-template-columns:4.6em 1fr 1.2fr;gap:6px;align-items:center;margin:0 0 6px;font-size:13px;color:var(--muted);font-weight:600}
+.offer{background:rgba(255,199,38,.08);border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:0 0 8px}
+.offer p{margin:0 0 6px;font-size:13.5px}
+.muted{color:var(--muted);font-weight:400}
+.plist .pbtns{justify-content:flex-start;gap:6px;margin-bottom:6px}
+.plist .pbtns .btn{padding:6px 10px;font-size:12.5px}

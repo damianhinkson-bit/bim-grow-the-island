@@ -14,6 +14,8 @@ export interface GameSession {
   advance(dtSeconds: number): void;
   newEvents(): GameEvent[];
   paused: boolean;
+  /** True for online games, where pausing is shared and limited. */
+  readonly online?: boolean;
 }
 
 export class LocalGame implements GameSession {

@@ -1,22 +1,48 @@
 import './style.css';
-import { LocalGame } from './game';
+import { stateHash, type Difficulty } from '@bim/sim';
+import { LocalGame, type GameSession } from './game';
+import { Menu } from './menu';
+import { NetworkGame } from './net';
 import { Renderer } from './render';
 import { UI } from './ui';
 
 async function boot() {
-  let game = new LocalGame({ players: 1 });
+  let game: GameSession = new LocalGame({ players: 1 });
+  let net: NetworkGame | null = null;
   const r = new Renderer();
   await r.init(game, document.getElementById('app')!);
   const centerHome = () => {
-    const home = game.state.parishes[game.state.players[0].home];
+    const me = game.state.players.find((p) => p.id === game.me) ?? game.state.players[0];
+    const home = game.state.parishes[me.home];
     r.z = Math.max(0.9, Math.min(1.5, r.vw / (13 * 24)));
     r.centerOn(home.lx, home.ly);
   };
-  centerHome();
-  const ui = new UI(game, r, (difficulty) => {
-    game = new LocalGame({ players: 1, difficulty });
-    r.setGame(game); ui.setGame(game); centerHome(); ui.start();
+  const play = (g: GameSession) => { game = g; r.setGame(g); ui.setGame(g); centerHome(); menu.hide(); ui.start(); };
+  const leaveNet = () => { net?.leave(); net = null; };
+
+  const ui = new UI(game, r, () => { ui.stop(); leaveNet(); menu.home(); });
+  const menu = new Menu({
+    solo: (difficulty: Difficulty) => { leaveNet(); play(new LocalGame({ players: 1, difficulty })); },
+    create: (name) => { leaveNet(); net = new NetworkGame(handlers(), name); net.create(); },
+    join: (name, code) => { leaveNet(); net = new NetworkGame(handlers(), name); net.join(code); },
+    settings: (m) => net?.settings(m),
+    start: () => net?.startGame(),
+    leave: () => leaveNet(),
   });
+  function handlers() {
+    return {
+      lobby: (l: Parameters<Menu['lobby']>[0], slot: number) => {
+        if (!l.started) { menu.lobby(l, slot); history.replaceState(null, '', `${location.pathname}?room=${l.code}`); }
+      },
+      started: (g: NetworkGame) => play(g),
+      error: (msg: string, fatal: boolean) => { if (fatal) { ui.stop(); net = null; menu.home(msg); } else ui.toast(msg, 'warn'); },
+      status: (msg: string | null) => { if (msg) ui.toast(msg, 'warn'); },
+      result: (res: { ok: boolean; msg?: string }) => ui.result(res),
+      paused: (p: boolean, by: string) => ui.showPaused(p, by),
+    };
+  }
+  menu.home();
+  centerHome();
   addEventListener('resize', () => r.clampCam());
   r.app.ticker.add((t) => {
     const dt = t.deltaMS / 1000;
@@ -26,6 +52,6 @@ async function boot() {
   });
   ui.renderPanel(true);
   // expose for debugging and automated play-tests
-  (window as unknown as { bim: unknown }).bim = { get game() { return game; }, r, ui };
+  (window as unknown as { bim: unknown }).bim = { get game() { return game; }, r, ui, stateHash };
 }
 boot();

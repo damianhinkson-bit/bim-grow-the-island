@@ -2,7 +2,7 @@ import {
   AGES, AGRO, AGRO_HOME, MAX_AGE, BOAT_COST, BOAT_RATE, BT, BUILD_LIST, DEALS, DUES, MAX_BOATS, NT, RELIEF, ROAD_COST, STALL, TOURISM, TRAIN, W,
   airportOpen, aquaPowered, canAfford, claimBlock, claimCost, dealTerms, drought, fmtCost, landmarkHolder, linked, owned,
   parishBuilt, player, popCap, protectedB, rivalCost, tcOf, teamOwned, winTarget, workersOf,
-  type BType, type Command, type DealId, type Difficulty, type Landmark, type State, type Worker,
+  type BType, type Command, type DealId, type Landmark, type Res, type State, type Worker,
 } from '@bim/sim';
 import { FlowTracker, dashboardHTML } from './dashboard';
 import type { GameSession } from './game';
@@ -14,8 +14,9 @@ const fmtT = (sec: number) => { const s = Math.max(0, Math.ceil(sec)); return `$
 
 export class UI {
   view: View = { sel: null, buildMode: null, marks: [], roadMode: false, roadDraft: new Set() };
-  private menu: 'build' | 'money' | null = null;
-  difficulty: Difficulty = 'normal';
+  private menu: 'build' | 'money' | 'trade' | null = null;
+  /** The trade or gift form: who it's for. */
+  private tradeWith: { pid: string; kind: 'offer' | 'gift' } | null = null;
   private lastPanel = '';
   private panelT = 0;
   private miniT = 0;
@@ -32,8 +33,8 @@ export class UI {
   private mini = $<HTMLCanvasElement>('#mini');
   running = false;
 
-  constructor(private game: GameSession, private r: Renderer, private onStart: (d: Difficulty) => void) {
-    this.bindPanel(); this.bindBar(); this.bindInput(); this.bindKeys(); this.bindStart(); this.bindDash();
+  constructor(private game: GameSession, private r: Renderer, private onEnd: () => void) {
+    this.bindPanel(); this.bindBar(); this.bindInput(); this.bindKeys(); this.bindDash();
   }
   setGame(game: GameSession) { this.seenAge = 1; this.storyShown = false; this.flows.reset(); this.closeDash(); this.game = game; this.view = { sel: null, buildMode: null, marks: [], roadMode: false, roadDraft: new Set() }; this.menu = null; this.lastPanel = ''; this.hudCache = {}; }
 
@@ -116,6 +117,15 @@ export class UI {
     else if (a === 'roadmode') { this.view.roadMode = true; this.view.buildMode = null; this.menu = null; this.view.roadDraft.clear(); }
     else if (a.startsWith('trade:')) { const [, at, deal] = a.split(':'); this.send({ type: 'trade', at: at as Landmark, deal: deal as DealId }); }
     else if (a === 'boat') this.send({ type: 'boat' });
+    else if (a === 'trade-send' && this.tradeWith) {
+      const num = (id: string) => Math.max(0, Math.floor(Number(($(id) as HTMLInputElement | null)?.value ?? 0)) || 0);
+      const res = (id: string) => (($(id) as HTMLSelectElement | null)?.value ?? 'food') as Res;
+      const give = { [res('#t-gr')]: num('#t-gn') };
+      const r = this.tradeWith.kind === 'gift'
+        ? this.send({ type: 'gift', to: this.tradeWith.pid, give })
+        : this.send({ type: 'offer', to: this.tradeWith.pid, give, get: { [res('#t-wr')]: num('#t-wn') } });
+      if (r.ok) { this.menu = null; this.tradeWith = null; if (this.game.online) this.toast('Sent.'); }
+    }
     else if (a === 'deselect') { this.view.sel = null; this.menu = null; this.view.buildMode = null; this.view.roadMode = false; this.view.roadDraft.clear(); }
     else if (a === 'train' && tc) this.send({ type: 'train', building: tc.id });
     else if (a === 'age') this.send({ type: 'age' });
@@ -151,6 +161,16 @@ export class UI {
     if (this.view.buildMode) {
       const d = BT[this.view.buildMode];
       return `<h3>Place ${d.name}</h3><p>Tap ${d.coast ? 'a coast tile' : 'an empty tile'} inside your parishes. ${d.desc}</p><div class="btns">${this.btn('cancel', 'Cancel')}</div>`;
+    }
+    if (this.menu === 'trade' && this.tradeWith) {
+      const other = player(s, this.tradeWith.pid);
+      if (!other) { this.menu = null; return this.panelHTML(); }
+      const opts = (sel: Res) => (['food', 'water', 'stone', 'bbd'] as Res[]).map((r) => `<option value="${r}"${r === sel ? ' selected' : ''}>${r === 'bbd' ? 'BBD' : r[0].toUpperCase() + r.slice(1)}</option>`).join('');
+      const giveRow = `<div class="trow"><span>You give</span><input id="t-gn" type="number" inputmode="numeric" min="0" step="10" value="50" aria-label="Amount to give"><select id="t-gr" aria-label="Resource to give">${opts('food')}</select></div>`;
+      if (this.tradeWith.kind === 'gift') return `<h3>Send to <span style="color:${other.color}">${other.name}</span></h3><p>A gift to your teammate. It arrives straight away.</p>${giveRow}<div class="btns">${this.btn('trade-send', 'Send gift', undefined, { primary: true })}${this.btn('deselect', 'Cancel')}</div>`;
+      return `<h3>Trade with <span style="color:${other.color}">${other.name}</span></h3><p>They have 60 seconds to accept. Nothing moves unless both of you can pay then.</p>${giveRow}
+        <div class="trow"><span>You get</span><input id="t-wn" type="number" inputmode="numeric" min="0" step="10" value="50" aria-label="Amount to get"><select id="t-wr" aria-label="Resource to get">${opts('stone')}</select></div>
+        <div class="btns">${this.btn('trade-send', 'Send offer', undefined, { primary: true })}${this.btn('deselect', 'Cancel')}</div>`;
     }
     if (this.menu === 'money') {
       const n = owned(s, me.id), hasMarket = Object.values(s.buildings).some((b) => b.owner === me.id && b.type === 'market' && b.done);
@@ -291,7 +311,8 @@ export class UI {
     $('#b-pause').onclick = () => {
       if (!this.running) return;
       this.game.paused = !this.game.paused;
-      $('#b-pause').textContent = this.game.paused ? 'Resume' : 'Pause'; $('#b-pause').classList.toggle('on', this.game.paused);
+      // online, the server confirms the pause for everyone and calls showPaused
+      if (!this.game.online) this.showPaused(this.game.paused);
     };
   }
   private bindKeys() {
@@ -419,6 +440,11 @@ export class UI {
       const b = (e.target as HTMLElement).closest('button'); if (!b || b.disabled) return;
       const a = b.dataset.act!;
       if (a === 'dash-house') { this.closeDash(); this.act('place:house'); return; }
+      if (a.startsWith('offer:') || a.startsWith('gift:')) {
+        const [kind, pid] = a.split(':') as ['offer' | 'gift', string];
+        this.tradeWith = { pid, kind }; this.menu = 'trade'; this.view.buildMode = null; this.closeDash(); this.renderPanel(true); return;
+      }
+      if (a.startsWith('answer:')) { const [, id, yes] = a.split(':'); this.send({ type: 'answer', offer: Number(id), accept: yes === '1' }); }
       if (a === 'dash-train') { const tc = tcOf(this.s, this.game.me); if (tc) this.send({ type: 'train', building: tc.id }); }
       else if (a === 'dash-idle') this.idleToFood();
       else if (a === 'stall-food') this.send({ type: 'market', trade: 'stall-food' });
@@ -462,21 +488,21 @@ export class UI {
   }
   /** The Recovery Age opens with a short history card. The game pauses while it's open. */
   private showStory() {
-    const card = $('#story'); card.hidden = false; this.game.paused = true;
-    $('#story-go').onclick = () => { card.hidden = true; this.game.paused = false; $('#b-pause').textContent = 'Pause'; $('#b-pause').classList.remove('on'); };
+    // solo games pause while the card is open; online the game keeps going for everyone
+    const card = $('#story'); card.hidden = false;
+    if (!this.game.online) this.game.paused = true;
+    $('#story-go').onclick = () => { card.hidden = true; if (!this.game.online) { this.game.paused = false; this.showPaused(false); } };
   }
 
   // ---------- start / end
-  private bindStart() {
-    document.querySelectorAll<HTMLButtonElement>('#difficulty .seg-b').forEach((b) => {
-      b.onclick = () => {
-        this.difficulty = b.dataset.d as Difficulty;
-        document.querySelectorAll<HTMLButtonElement>('#difficulty .seg-b').forEach((o) => { o.classList.toggle('on', o === b); o.setAttribute('aria-checked', String(o === b)); });
-      };
-    });
-    $('#start').onclick = () => this.onStart(this.difficulty);
+  showPaused(p: boolean, by?: string) {
+    $('#b-pause').textContent = p ? 'Resume' : 'Pause'; $('#b-pause').classList.toggle('on', p);
+    if (by && this.game.online) this.toast(p ? `${by} paused the game.` : `${by} resumed the game.`);
   }
-  start() { $('#overlay').hidden = true; this.running = true; this.game.paused = false; this.renderPanel(true); }
+  /** Outcome of one of my online commands, arriving with the server tick that applied it. */
+  result(r: { ok: boolean; msg?: string }) { if (r.msg) this.toast(r.msg, r.ok ? undefined : 'warn'); }
+  start() { $('#overlay').hidden = true; this.running = true; if (!this.game.online) this.game.paused = false; this.showPaused(false); this.renderPanel(true); }
+  stop() { this.running = false; this.closeDash(); }
   private end() {
     this.running = false;
     const s = this.s, o = s.ended!, won = o.winners.includes(this.game.me);
@@ -485,8 +511,8 @@ export class UI {
       <h1>${won ? 'Food secure!' : o.winners.includes(AGRO) ? 'Bought out' : 'Out-grown'}</h1>
       <p class="sub">${won ? `Your co-op feeds ${owned(s, me.id)} parishes in the Co-op Age. Barbados eats what Barbados grows.` : o.winners.includes(AGRO) ? `AgroCorp now controls ${owned(s, AGRO)} parishes. Feed more parishes earlier and keep a building in each one.` : `${player(s, o.winners[0])?.name} fed their parishes first.`}</p>
       <ul><li><strong>${Math.floor(me.stats.food)}</strong> food grown and gathered</li><li><strong>${workersOf(s, me.id).length}</strong> workers, <strong>${Object.values(s.buildings).filter((b) => b.owner === me.id && b.done).length}</strong> buildings standing</li><li><strong>${s.weather.hurrIdx}</strong> hurricanes weathered</li></ul>
-      <button class="btn primary" id="start">Play again</button>`;
+      <button class="btn primary" id="again">Back to the menu</button>`;
     $('#overlay').hidden = false;
-    $('#start').onclick = () => this.onStart(this.difficulty);
+    $('#again').onclick = () => this.onEnd();
   }
 }

@@ -239,11 +239,13 @@ Up to **4 players** online, alongside single-player:
 - **All five ages built** (decided: no merging). Costs to enter each age: Rain-fed Farming 150 food + 50 stone (20 s); Recovery 300 food, 100 water, 150 stone, 80 BBD (30 s); Sustainable Tech 400 food, 150 water, 200 stone, 150 BBD (40 s); Co-op 600 food, 200 water, 300 stone, 300 BBD (50 s). Unlocks: Foraging has huts and depots; Rain-fed Farming adds farm plots, cisterns, the market and seawalls; Recovery adds the Composter (farms within 3 tiles +40%) and Windbreak (inland hurricane shield, 3 tiles); Sustainable Tech adds aquaponics and solar; Co-op adds the Co-op Hub (drop-off, +50% dues). Winning needs the Co-op Age.
 - **Each age has its own look** for a player's Town Centre, houses, farms, depots, roads and workers: thatch and dirt tracks, then timber and galvanised roofs, then painted chattel houses and coral-stone roads, then solar roofs and paved roads, then the Co-op Hall and two-storey verandah houses. Age-ups fire a confetti burst and a banner. The Recovery Age opens with the "cane years" history card, and the game pauses while it is open.
 
+- **Multiplayer built (step 3).** Lockstep instead of Colyseus state sync: phones run the same simulation and the server relays commands each 0.1 s tick while running its own copy as referee (fingerprint checks every 5 s, snapshot resync, rejoin by token). Plain WebSockets replace Colyseus. One Render web service hosts the game page and the server. Rooms: 5-letter codes and invite links, host picks Co-op or Versus and AgroCorp difficulty, up to 4 players. Pauses are shared (3 per player, 60 s max). Trading: offers last 60 s and are checked again on accept; gifts only between co-op teammates. Still to do: AI takeover for players who leave, and Versus win timer.
+
 ## 15. Build plan
 
 1. ✅ **Real map:** coastline, parishes, terrain and towns.
-2. **Foundation:** move to a GitHub repo and split the game logic from the drawing. Everything a player does becomes a command, so the same game runs on a phone or on a server.
-3. **Multiplayer prototype:** rooms for up to 4 players with invite codes, a hosted server, trading, and Co-op vs AgroCorp on today's gameplay.
+2. ✅ **Foundation:** move to a GitHub repo and split the game logic from the drawing. Everything a player does becomes a command, so the same game runs on a phone or on a server.
+3. ✅ **Multiplayer prototype:** rooms for up to 4 players with invite codes, a hosted server, trading, and Co-op vs AgroCorp on today's gameplay.
 4. **Seasons and crops:** the calendar, crop picker and soil.
 5. **Parish food security:** demand, supply routes and status badges.
 6. **Aquaponics system.**
