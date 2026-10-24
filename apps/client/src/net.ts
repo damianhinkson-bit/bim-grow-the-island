@@ -74,7 +74,11 @@ export class NetworkGame implements GameSession {
   }
   settings(m: Partial<Pick<LobbyInfo, 'mode' | 'difficulty'>>) { this.raw({ t: 'settings', ...m }); }
   startGame() { this.raw({ t: 'start' }); }
-  leave() { this.closing = true; this.raw({ t: 'leave' }); this.ws?.close(); }
+  leave() {
+    this.closing = true; clearTimeout(this.retryTimer); document.removeEventListener('visibilitychange', this.onVisible);
+    this.raw({ t: 'leave' }); this.ws?.close();
+    if (this.code) { try { localStorage.removeItem(`bim:token:${this.code}`); } catch { /* storage blocked */ } }
+  }
 
   send(c: Command): CmdResult {
     // commands take effect on the next server tick; the outcome arrives through handlers.result
@@ -117,7 +121,16 @@ export class NetworkGame implements GameSession {
     if (s.tick % HASH_EVERY === 0) this.raw({ t: 'hash', tick: s.tick, h: stateHash(s) });
   }
 
+  private retryTimer: ReturnType<typeof setTimeout> | undefined;
+  private rejoin() { this.open(() => this.raw({ t: 'join', code: this.code, name: this.name, token: this.token, v: PROTOCOL })); }
+  /** When the player switches back to the browser, reconnect at once instead of waiting for the next retry. */
+  private onVisible = () => {
+    if (document.visibilityState !== 'visible' || this.closing || !this.code || !this.token) return;
+    if (!this.ws || this.ws.readyState === WebSocket.CLOSED || this.ws.readyState === WebSocket.CLOSING) { clearTimeout(this.retryTimer); this.retries = 0; this.rejoin(); }
+  };
   private open(first: () => void) {
+    document.removeEventListener('visibilitychange', this.onVisible);
+    document.addEventListener('visibilitychange', this.onVisible);
     this.closing = false;
     let ws: WebSocket;
     try { ws = new WebSocket(serverUrl()); } catch { this.h.error("Couldn't reach the game server.", true); return; }
@@ -127,10 +140,12 @@ export class NetworkGame implements GameSession {
     ws.onclose = () => {
       if (this.ws !== ws || this.closing) return;
       // reconnect with our seat token; the server sends the current game back
-      if (this.code && this.token && this.retries < 20) {
+      if (this.code && this.token && this.retries < 30) {
         this.retries++;
-        this.h.status('Connection lost. Reconnecting…');
-        setTimeout(() => this.open(() => this.raw({ t: 'join', code: this.code, name: this.name, token: this.token, v: PROTOCOL })), Math.min(5000, 800 * this.retries));
+        // quiet in the lobby (it happens every time the phone switches apps); say so once a game is running
+        if (this.state) this.h.status('Connection lost. Reconnecting…');
+        clearTimeout(this.retryTimer);
+        this.retryTimer = setTimeout(() => this.rejoin(), Math.min(5000, 800 * this.retries));
       } else if (!this.code) this.h.error("Couldn't reach the game server. Check your connection and try again.", true);
       else this.h.error('Lost the connection to the game.', true);
     };

@@ -11,6 +11,7 @@ const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ'; // no I, L or O: easy to read out lo
 const HASH_EVERY = 50;
 const PAUSE_LIMIT = 3, PAUSE_MAX_S = 60;
 const IDLE_ROOM_MS = 10 * 60 * 1000;
+const LOBBY_SEAT_MS = 10 * 60 * 1000, HOST_HANDOVER_MS = 60 * 1000;
 const MAX_CMDS_PER_TICK = 25;
 
 interface Slot { name: string; token: string; conn: Conn | null; pauses: number; lastSeen: number; awaySince: number; ai: boolean }
@@ -67,15 +68,22 @@ export class Room {
     return k;
   }
 
-  disconnect(conn: Conn) {
+  /**
+   * A connection closed. Phones drop their connection whenever the browser goes to the background (say, to send the
+   * code on WhatsApp), so the seat is kept and the player can come straight back. Only tapping Leave in the lobby
+   * gives the seat up.
+   */
+  disconnect(conn: Conn, leaving = false) {
     const k = this.slots.findIndex((s) => s.conn === conn); if (k < 0) return;
-    if (!this.started) {
-      // in the lobby a player who leaves frees their seat
-      this.slots.splice(k, 1);
-      if (this.host === k) this.host = 0; else if (this.host > k) this.host--;
-    } else { this.slots[k].conn = null; this.slots[k].awaySince = this.clock; }
-    if (!this.slots.some((s) => s.conn)) this.emptySince = Date.now();
+    if (!this.started && leaving) this.removeSeat(k);
+    // -1 means 'just left': the next update stamps the time from the room's own clock
+    else { this.slots[k].conn = null; this.slots[k].awaySince = -1; }
+    if (!this.slots.some((s) => s.conn)) this.emptySince = -1;
     this.sendLobby();
+  }
+  private removeSeat(k: number) {
+    this.slots.splice(k, 1);
+    if (this.host === k) this.host = 0; else if (this.host > k) this.host--;
   }
 
   message(conn: Conn, m: ClientMsg) {
@@ -119,7 +127,7 @@ export class Room {
         if (slot.pauses >= PAUSE_LIMIT) return err(`You've used all ${PAUSE_LIMIT} of your pauses.`);
         slot.pauses++; this.setPaused(true, slot.name); return;
       }
-      case 'leave': this.disconnect(conn); return;
+      case 'leave': this.disconnect(conn, true); return;
     }
   }
 
@@ -134,10 +142,13 @@ export class Room {
   private clock = Date.now();
   update(now: number) {
     this.clock = now;
-    if (!this.state || this.state.ended) return;
+    for (const sl of this.slots) if (sl.awaySince === -1) sl.awaySince = now;
+    if (this.emptySince === -1) this.emptySince = now;
+    if (!this.state) { this.lobbyUpkeep(now); return; }
+    if (this.state.ended) return;
     // hand away players' co-ops to the caretaker after a while
     let changed = false;
-    for (const sl of this.slots) if (!sl.conn && !sl.ai && sl.awaySince && now - sl.awaySince > AI_AFTER_S * 1000) { sl.ai = true; changed = true; }
+    for (const sl of this.slots) if (!sl.conn && !sl.ai && sl.awaySince > 0 && now - sl.awaySince > AI_AFTER_S * 1000) { sl.ai = true; changed = true; }
     if (changed) this.sendLobby();
     if (this.paused) { if (now - this.pausedAt > PAUSE_MAX_S * 1000) this.setPaused(false, 'the timer'); return; }
     this.acc += now - this.last; this.last = now;
@@ -157,7 +168,21 @@ export class Room {
       for (const t of this.hashes.keys()) if (t < s.tick - HASH_EVERY * 20) this.hashes.delete(t);
     }
   }
-  idleFor(now: number) { return this.emptySince ? now - this.emptySince : 0; }
+  idleFor(now: number) { return this.emptySince > 0 ? now - this.emptySince : 0; }
+  /** In the lobby: free seats of players gone for 10 minutes, and pass the host role on if the host has been gone a minute. */
+  private lobbyUpkeep(now: number) {
+    let changed = false;
+    for (let k = this.slots.length - 1; k >= 0; k--) {
+      const sl = this.slots[k];
+      if (!sl.conn && sl.awaySince > 0 && now - sl.awaySince > LOBBY_SEAT_MS && this.slots.some((o) => o.conn)) { this.removeSeat(k); changed = true; }
+    }
+    const h = this.slots[this.host];
+    if (h && !h.conn && h.awaySince > 0 && now - h.awaySince > HOST_HANDOVER_MS) {
+      const next = this.slots.findIndex((o) => o.conn);
+      if (next >= 0) { this.host = next; changed = true; }
+    }
+    if (changed) this.sendLobby();
+  }
 }
 
 function cleanName(name: unknown, k: number): string {
@@ -202,7 +227,7 @@ export class Lobby {
   update(now: number) {
     for (const [code, r] of this.rooms) {
       r.update(now);
-      const empty = !r.slots.length || (!r.slots.some((s) => s.conn) && r.idleFor(now) > (r.started ? IDLE_ROOM_MS : 60_000));
+      const empty = !r.slots.length || (!r.slots.some((s) => s.conn) && r.idleFor(now) > IDLE_ROOM_MS);
       if (empty) this.rooms.delete(code);
     }
   }

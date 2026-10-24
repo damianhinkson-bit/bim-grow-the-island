@@ -137,3 +137,46 @@ describe('caretaker', () => {
     expect(stateHash(back.state!)).toBe(stateHash(room.state!));
   });
 });
+
+describe('lobby survives phones switching apps', () => {
+  it("keeps the room and the host's seat while the host is away sending the code, so the friend can still join", () => {
+    const lobby = new Lobby(); const host = new Phone();
+    lobby.handle(host, { t: 'create', name: 'Damian', v: V });
+    const { code, token } = host.last('joined')!;
+    lobby.drop(host);            // host switches to WhatsApp: the browser drops the connection
+    run(lobby, 90);              // a minute and a half later…
+    const friend = new Phone();
+    lobby.handle(friend, { t: 'join', code, name: 'Kemar', v: V });
+    expect(friend.last('error')).toBeUndefined();
+    const again = new Phone();   // host comes back: same room, same code, still the host
+    lobby.handle(again, { t: 'join', code, name: 'Damian', token, v: V });
+    const info = again.last('lobby')!.lobby;
+    expect(info.code).toBe(code);
+    expect(info.players.map((p) => [p.name, p.connected])).toEqual([['Damian', true], ['Kemar', true]]);
+    expect(again.last('joined')!.slot).toBe(0);
+  });
+  it('passes the host role on if the host is gone for over a minute, and Leave frees a seat', () => {
+    const lobby = new Lobby(); const a = new Phone(), b = new Phone(), c = new Phone();
+    lobby.handle(a, { t: 'create', name: 'A', v: V });
+    const code = a.last('joined')!.code;
+    lobby.handle(b, { t: 'join', code, name: 'B', v: V });
+    lobby.handle(c, { t: 'join', code, name: 'C', v: V });
+    lobby.drop(a);
+    run(lobby, 70);
+    expect(b.last('lobby')!.lobby.host).toBe(1);
+    lobby.handle(c, { t: 'leave' });
+    expect(b.last('lobby')!.lobby.players.map((p) => p.name)).toEqual(['A', 'B']);
+  });
+  it('frees a seat after 10 minutes away in the lobby, and deletes an empty room after 10 minutes', () => {
+    const lobby = new Lobby(); const a = new Phone(), b = new Phone();
+    lobby.handle(a, { t: 'create', name: 'A', v: V });
+    const code = a.last('joined')!.code;
+    lobby.handle(b, { t: 'join', code, name: 'B', v: V });
+    lobby.drop(b);
+    run(lobby, 610);
+    expect(a.last('lobby')!.lobby.players.map((p) => p.name)).toEqual(['A']);
+    lobby.drop(a);
+    run(lobby, 610);
+    expect(lobby.rooms.has(code)).toBe(false);
+  });
+});

@@ -46,7 +46,13 @@ async function boot() {
         if (!l.started) { menu.lobby(l, slot); history.replaceState(null, '', `${location.pathname}?room=${l.code}`); }
       },
       started: (g: NetworkGame) => play(g),
-      error: (msg: string, fatal: boolean) => { if (fatal) { ui.stop(); net = null; menu.home(msg); } else ui.toast(msg, 'warn'); },
+      error: (msg: string, fatal: boolean) => {
+        if (!fatal) { ui.toast(msg, 'warn'); return; }
+        // the room is gone (or full): forget it so the menu doesn't keep offering it
+        const code = new URLSearchParams(location.search).get('room');
+        if (code && /no game|already started|full/i.test(msg)) { try { localStorage.removeItem(`bim:token:${code}`); } catch { /* blocked */ } history.replaceState(null, '', location.pathname); }
+        ui.stop(); net = null; menu.home(msg);
+      },
       status: (msg: string | null) => { if (msg) ui.toast(msg, 'warn'); },
       result: (res: { ok: boolean; msg?: string }) => ui.result(res),
       paused: (p: boolean, by: string) => ui.showPaused(p, by),
@@ -55,6 +61,16 @@ async function boot() {
     };
   }
   menu.home();
+  // Coming back to a room link we already have a seat in (page reloaded, or the phone killed the tab while you were
+  // sending the code): rejoin straight away, same room and code.
+  const back = (new URLSearchParams(location.search).get('room') ?? '').toUpperCase();
+  let saved: string | null = null;
+  try { saved = back ? localStorage.getItem(`bim:token:${back}`) : null; } catch { /* storage blocked */ }
+  if (back && saved) {
+    let name = 'Player'; try { name = localStorage.getItem('bim:name') || name; } catch { /* blocked */ }
+    menu.waiting(`Reconnecting to game ${back}…`);
+    net = new NetworkGame(handlers(), name); net.join(back);
+  }
   centerHome();
   addEventListener('resize', () => r.clampCam());
   r.app.ticker.add((t) => {
