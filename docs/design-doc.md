@@ -234,6 +234,8 @@ Up to **4 players** online, alongside single-player:
 - **Food upkeep:** every worker eats 6 food a minute. When the stockpile can't cover it, all that player's workers work at half speed until food comes in. (This is the first step toward parish demand in section 9.)
 - **Dashboard built:** opened from the bottom bar. It shows food in and out with how long the stock lasts, stockpiles with per-minute rates, housing, worker jobs, resources left on your land, buildings, parish protection, AgroCorp's next target and upcoming threats.
 
+- **Roads, port and airport built.** Highways are road tiles; workers move twice as fast on them and route along them. Players lay road tiles in their own parishes by dragging (5 coral stone each). Bridgetown Port (St. Michael): export 100 food for 60 BBD or 100 stone for 50, import 100 food for 80 or 100 water for 40, up to 3 fishing boats (60 stone + 40 BBD, 24 food/min each, can sink in hurricanes), and a relief ship with 80 food after each hurricane. Grantley Adams Airport (Christ Church): air-freight 50 food for 45 BBD, tourism worth 18 BBD/min to the parish holder, closed from the hurricane warning until the storm passes. A player can trade only once their Town Centre, a Depot or a Market connects to the landmark by road; the parish holder takes 10% of each deal's BBD, including AgroCorp.
+
 ## 15. Build plan
 
 1. ✅ **Real map:** coastline, parishes, terrain and towns.

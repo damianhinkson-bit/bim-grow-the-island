@@ -42,7 +42,7 @@ function drawNode(g: CanvasRenderingContext2D, type: NodeType) {
 }
 
 function drawBuilding(g: CanvasRenderingContext2D, type: BType, variant: number, opts: { dry?: boolean } = {}) {
-  const x = 0, y = 0, w = type === 'tc' || type === 'hq' ? 2 * T : T, h = w;
+  const x = 0, y = 0, w = type === 'tc' || type === 'hq' || type === 'port' || type === 'airport' ? 2 * T : T, h = w;
   g.fillStyle = 'rgba(0,0,0,.22)'; g.fillRect(x + 3, y + h - 5, w - 4, 4);
   switch (type) {
     case 'tc':
@@ -99,6 +99,26 @@ function drawBuilding(g: CanvasRenderingContext2D, type: BType, variant: number,
       for (let k = 1; k < 3; k++) { g.moveTo(x + 3, y + 5 + k * 4.7); g.lineTo(x + 21, y + 5 + k * 4.7); }
       g.stroke();
       break;
+    case 'port':
+      // quay, containers, two cranes and a ship alongside
+      g.fillStyle = '#8E99A3'; g.fillRect(x + 2, y + 18, w - 4, h - 22);
+      g.fillStyle = '#B8C0C7'; g.fillRect(x + 2, y + 18, w - 4, 3);
+      [['#E2553F', 6, 26], ['#3FA7D6', 14, 26], ['#FFC726', 6, 32], ['#6CC24A', 14, 32], ['#F4A6B8', 22, 32], ['#3FA7D6', 22, 26]].forEach(([c, cx, cy]) => { g.fillStyle = c as string; g.fillRect(x + (cx as number), y + (cy as number), 7, 5); });
+      g.strokeStyle = '#F28C28'; g.lineWidth = 2;
+      for (const cx of [32, 40]) { g.beginPath(); g.moveTo(x + cx, y + 36); g.lineTo(x + cx, y + 8); g.lineTo(x + cx - 10, y + 8); g.stroke(); g.beginPath(); g.moveTo(x + cx - 8, y + 8); g.lineTo(x + cx - 8, y + 15); g.stroke(); }
+      g.fillStyle = '#2B3A55'; g.beginPath(); g.moveTo(x + 4, y + 4); g.lineTo(x + 26, y + 4); g.lineTo(x + 23, y + 13); g.lineTo(x + 7, y + 13); g.closePath(); g.fill();
+      g.fillStyle = '#F4F1E8'; g.fillRect(x + 17, y + 0.5, 6, 4); g.fillStyle = '#E2553F'; g.fillRect(x + 8, y + 6, 12, 2);
+      break;
+    case 'airport':
+      // terminal, control tower and a plane on the apron
+      g.fillStyle = '#5E636B'; g.fillRect(x + 2, y + 30, w - 4, h - 33);
+      g.fillStyle = '#F4F1E8'; g.fillRect(x + 4, y + 16, 30, 13); g.fillStyle = '#2E6FB8'; g.fillRect(x + 4, y + 16, 30, 4);
+      g.fillStyle = '#7FB7D9'; for (let k = 0; k < 5; k++) g.fillRect(x + 7 + k * 5.5, y + 22, 3, 4);
+      g.fillStyle = '#D7DCE0'; g.fillRect(x + 37, y + 8, 5, 21); g.fillStyle = '#2E6FB8'; g.fillRect(x + 35, y + 4, 9, 5);
+      g.fillStyle = '#FFFFFF'; g.beginPath(); g.moveTo(x + 10, y + 39); g.lineTo(x + 34, y + 39); g.lineTo(x + 37, y + 41); g.lineTo(x + 34, y + 43); g.lineTo(x + 10, y + 43); g.closePath(); g.fill();
+      g.beginPath(); g.moveTo(x + 20, y + 41); g.lineTo(x + 26, y + 33); g.lineTo(x + 28, y + 33); g.lineTo(x + 25, y + 41); g.closePath(); g.fill();
+      g.fillStyle = '#00267F'; g.fillRect(x + 10, y + 36.5, 3, 3); g.fillStyle = '#FFC726'; g.fillRect(x + 14, y + 40, 16, 1.2);
+      break;
   }
 }
 
@@ -116,7 +136,7 @@ const once = (key: string, f: () => Texture) => { let t = cache.get(key); if (!t
 
 export const nodeTex = (t: NodeType) => once('n:' + t, () => make(T, T, (g) => drawNode(g, t)));
 export function buildingTex(t: BType, variant: number, opts: { dry?: boolean; foundation?: boolean } = {}) {
-  const size = t === 'tc' || t === 'hq' ? 2 * T : T;
+  const size = t === 'tc' || t === 'hq' || t === 'port' || t === 'airport' ? 2 * T : T;
   const key = `b:${t}:${t === 'house' ? variant % 6 : 0}:${opts.dry ? 1 : 0}:${opts.foundation ? 1 : 0}`;
   return once(key, () => make(size, size, (g) => {
     if (opts.foundation) {

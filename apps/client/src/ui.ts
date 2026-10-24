@@ -1,7 +1,8 @@
 import {
-  AGE_COST, AGE_T, AGRO, AGRO_HOME, BT, BUILD_LIST, DUES, NT, STALL, TRAIN, W, aquaPowered, canAfford, claimBlock, claimCost, drought, fmtCost, owned,
+  AGE_COST, AGE_T, AGRO, AGRO_HOME, BOAT_COST, BOAT_RATE, BT, BUILD_LIST, DEALS, DUES, MAX_BOATS, NT, RELIEF, ROAD_COST, STALL, TOURISM, TRAIN, W,
+  airportOpen, aquaPowered, canAfford, claimBlock, claimCost, dealTerms, drought, fmtCost, landmarkHolder, linked, owned,
   parishBuilt, player, popCap, protectedB, rivalCost, tcOf, teamOwned, winTarget, workersOf,
-  type BType, type Command, type Difficulty, type State, type Worker,
+  type BType, type Command, type DealId, type Difficulty, type Landmark, type State, type Worker,
 } from '@bim/sim';
 import { FlowTracker, dashboardHTML } from './dashboard';
 import type { GameSession } from './game';
@@ -12,7 +13,7 @@ const $ = <E extends HTMLElement = HTMLElement>(s: string) => document.querySele
 const fmtT = (sec: number) => { const s = Math.max(0, Math.ceil(sec)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
 export class UI {
-  view: View = { sel: null, buildMode: null, marks: [] };
+  view: View = { sel: null, buildMode: null, marks: [], roadMode: false, roadDraft: new Set() };
   private menu: 'build' | 'money' | null = null;
   difficulty: Difficulty = 'normal';
   private lastPanel = '';
@@ -31,7 +32,7 @@ export class UI {
   constructor(private game: GameSession, private r: Renderer, private onStart: (d: Difficulty) => void) {
     this.bindPanel(); this.bindBar(); this.bindInput(); this.bindKeys(); this.bindStart(); this.bindDash();
   }
-  setGame(game: GameSession) { this.flows.reset(); this.closeDash(); this.game = game; this.view = { sel: null, buildMode: null, marks: [] }; this.menu = null; this.lastPanel = ''; this.hudCache = {}; }
+  setGame(game: GameSession) { this.flows.reset(); this.closeDash(); this.game = game; this.view = { sel: null, buildMode: null, marks: [], roadMode: false, roadDraft: new Set() }; this.menu = null; this.lastPanel = ''; this.hudCache = {}; }
 
   private get s(): State { return this.game.state; }
   private get me() { return player(this.s, this.game.me)!; }
@@ -106,8 +107,11 @@ export class UI {
     const s = this.s, tc = tcOf(s, this.game.me), sel = this.view.sel;
     if (a === 'build') { this.menu = this.menu === 'build' ? null : 'build'; this.view.buildMode = null; }
     else if (a.startsWith('place:')) { this.view.buildMode = a.slice(6) as BType; this.menu = null; }
-    else if (a === 'cancel') { this.view.buildMode = null; this.menu = null; }
-    else if (a === 'deselect') { this.view.sel = null; this.menu = null; this.view.buildMode = null; }
+    else if (a === 'cancel') { this.view.buildMode = null; this.menu = null; this.view.roadMode = false; this.view.roadDraft.clear(); }
+    else if (a === 'roadmode') { this.view.roadMode = true; this.view.buildMode = null; this.menu = null; this.view.roadDraft.clear(); }
+    else if (a.startsWith('trade:')) { const [, at, deal] = a.split(':'); this.send({ type: 'trade', at: at as Landmark, deal: deal as DealId }); }
+    else if (a === 'boat') this.send({ type: 'boat' });
+    else if (a === 'deselect') { this.view.sel = null; this.menu = null; this.view.buildMode = null; this.view.roadMode = false; this.view.roadDraft.clear(); }
     else if (a === 'train' && tc) this.send({ type: 'train', building: tc.id });
     else if (a === 'age') this.send({ type: 'age' });
     else if (a === 'sell-food' || a === 'sell-stone' || a === 'buy-water' || a === 'stall-food') this.send({ type: 'market', trade: a });
@@ -135,6 +139,10 @@ export class UI {
   }
   private panelHTML(): string {
     const s = this.s, me = this.me, sel = this.view.sel;
+    if (this.view.roadMode) {
+      const linkedTo = (['port', 'airport'] as const).filter((t) => linked(s, me.id, t)).map((t) => BT[t].name);
+      return `<h3>Lay road</h3><p>Drag across tiles in your parishes. <strong>${ROAD_COST} coral stone a tile</strong>; you have ${Math.floor(me.res.stone)}. Workers walk twice as fast on roads. Gold roads connect to your Town Centre, Depots and Markets${linkedTo.length ? `, and already reach ${linkedTo.join(' and ')}` : ''}.</p><div class="btns">${this.btn('cancel', 'Done', undefined, { primary: true })}</div>`;
+    }
     if (this.view.buildMode) {
       const d = BT[this.view.buildMode];
       return `<h3>Place ${d.name}</h3><p>Tap ${d.coast ? 'a coast tile' : 'an empty tile'} inside your parishes. ${d.desc}</p><div class="btns">${this.btn('cancel', 'Cancel')}</div>`;
@@ -148,7 +156,7 @@ export class UI {
       </ul><div class="btns">${tcOf(s, me.id) ? this.btn('stall-food', `Sell ${STALL.food} food now`, `+${STALL.bbd} BBD`, { primary: true, disabled: me.res.food < STALL.food }) : ''}${this.btn('deselect', 'Close')}</div>`;
     }
     if (this.menu === 'build') {
-      return `<h3>Build</h3><p>Costs come out when you place it. Selected or idle workers go build it.</p><div class="grid2">${BUILD_LIST.map((k) => {
+      return `<h3>Build</h3><p>Costs come out when you place it. Selected or idle workers go build it.</p><div class="grid2">${this.btn('roadmode', 'Road', `${ROAD_COST} stone a tile`, { disabled: me.res.stone < ROAD_COST })}${BUILD_LIST.map((k) => {
         const d = BT[k], locked = (d.age ?? 1) > me.age;
         return this.btn('place:' + k, d.name, locked ? 'Co-op Age' : fmtCost(d.cost), { disabled: locked || !canAfford(me.res, d.cost) });
       }).join('')}</div>`;
@@ -168,6 +176,7 @@ export class UI {
     if (sel.kind === 'building') {
       const b = s.buildings[sel.id]; if (!b) { this.view.sel = null; return this.panelHTML(); }
       const d = BT[b.type], mine = b.owner === this.game.me;
+      if (b.type === 'port' || b.type === 'airport') return this.landmarkHTML(b.type);
       const ownerName = mine ? '' : ` <span class="tag t-free">${player(s, b.owner)?.name ?? 'AgroCorp'}</span>`;
       if (!b.done) return `<h3>${d.name}${ownerName}</h3><p>Under construction: ${Math.floor(b.progress * 100)}%. Select workers and tap it to help build.</p><div class="btns">${this.btn('deselect', 'Close')}</div>`;
       let info = d.desc, btns = '';
@@ -204,6 +213,24 @@ export class UI {
       return `<h3>${p.name}</h3><p>${tag} ${body}</p><div class="btns">${b2}${this.btn('deselect', 'Close')}</div>`;
     }
     return '';
+  }
+  private landmarkHTML(at: Landmark): string {
+    const s = this.s, me = this.me, d = BT[at], holder = landmarkHolder(s, at);
+    const holderTxt = holder === me.id ? 'You hold this parish, so you pay no fee.' : holder === AGRO ? '<strong>AgroCorp holds this parish</strong> and takes 10% of every deal.' : holder ? `${player(s, holder)?.name} holds this parish and takes 10% of every deal.` : 'Nobody holds this parish yet, so there is no fee.';
+    if (!linked(s, me.id, at)) {
+      return `<h3>${d.name}</h3><p>${d.desc} <strong>Not connected.</strong> Lay a road from your Town Centre, a Depot or a Market to any highway (Build → Road), then you can trade here. ${holderTxt}</p><div class="btns">${this.btn('roadmode', 'Lay road', `${ROAD_COST} stone a tile`, { primary: true })}${this.btn('deselect', 'Close')}</div>`;
+    }
+    const closed = at === 'airport' && !airportOpen(s);
+    const deals = (Object.keys(DEALS[at]) as DealId[]).map((id) => {
+      const t = dealTerms(s, me.id, at, id), dl = t.deal;
+      const sub = dl.get.bbd ? `${fmtCost(dl.give)} → ${t.net} BBD` : `${t.net} BBD → ${fmtCost(dl.get)}`;
+      const give = { ...dl.give }; if (give.bbd) give.bbd = t.net;
+      return this.btn(`trade:${at}:${id}`, dl.label, sub + (t.fee ? ` (fee ${t.fee})` : ''), { disabled: closed || !canAfford(me.res, give) });
+    }).join('');
+    let extra = '';
+    if (at === 'port') extra = this.btn('boat', `Launch fishing boat (${me.boats}/${MAX_BOATS})`, `${fmtCost(BOAT_COST)} · +${Math.round(BOAT_RATE * 60)} food/min`, { disabled: me.boats >= MAX_BOATS || !canAfford(me.res, BOAT_COST) });
+    const note = at === 'port' ? `After each hurricane a relief ship brings ${RELIEF} food to every co-op connected here.` : closed ? '<strong>Closed for the hurricane.</strong>' : `Tourists pay ${Math.round(TOURISM * 60)} BBD a minute to whoever holds Christ Church while it's open.`;
+    return `<h3>${d.name}</h3><p>Connected by road. ${holderTxt} ${note}</p><div class="grid2">${deals}${extra}</div><div class="btns" style="margin-top:6px">${this.btn('deselect', 'Close')}</div>`;
   }
   renderPanel(force = false) {
     const h = this.panelHTML();
@@ -246,13 +273,44 @@ export class UI {
     const cv = this.r.app.canvas;
     const ptrs = new Map<number, { x: number; y: number; sx: number; sy: number }>();
     let moved = false, pinchD = 0;
+    let lastPaint = -1;
+    const tileAt = (sx: number, sy: number) => {
+      const tx = Math.floor((sx / this.r.z + this.r.cam.x) / T), ty = Math.floor((sy / this.r.z + this.r.cam.y) / T);
+      return tx >= 0 && ty >= 0 && tx < W && ty * W < this.s.map.land.length ? ty * W + tx : -1;
+    };
+    const canRoad = (i: number) => {
+      const s = this.s;
+      return i >= 0 && s.map.land[i] === 1 && !s.roads[i] && s.nodeAt[i] < 0 && s.bAt[i] < 0 && s.parishes[s.map.pid[i]]?.owner === this.game.me;
+    };
+    /** Adds the tiles on the line from the last painted tile to this one, so fast drags leave no gaps. */
+    const paint = (sx: number, sy: number) => {
+      const i = tileAt(sx, sy); if (i < 0 || i === lastPaint) return;
+      const from = lastPaint < 0 ? i : lastPaint;
+      const x0 = from % W, y0 = (from / W) | 0, x1 = i % W, y1 = (i / W) | 0;
+      const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+      for (let k = 0; k <= n; k++) {
+        const x = Math.round(x0 + ((x1 - x0) * k) / Math.max(1, n)), y = Math.round(y0 + ((y1 - y0) * k) / Math.max(1, n)), j = y * W + x;
+        if (canRoad(j)) this.view.roadDraft.add(j);
+      }
+      lastPaint = i;
+    };
+    const commitRoad = () => {
+      if (this.view.roadDraft.size) {
+        const res = this.send({ type: 'road', tiles: [...this.view.roadDraft] });
+        if (res.ok) this.renderPanel(true);
+      }
+      this.view.roadDraft.clear(); lastPaint = -1;
+    };
     cv.addEventListener('pointerdown', (e) => {
       if (ptrs.size === 0) moved = false;
       try { cv.setPointerCapture(e.pointerId); } catch { /* not all browsers */ }
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY }); pinchD = 0;
+      if (this.view.roadMode && ptrs.size === 1 && this.running) { lastPaint = -1; paint(e.clientX, e.clientY); }
+      if (ptrs.size === 2) { this.view.roadDraft.clear(); lastPaint = -1; }
     });
     cv.addEventListener('pointermove', (e) => {
       const p = ptrs.get(e.pointerId); if (!p) return;
+      if (ptrs.size === 1 && this.view.roadMode && this.running) { moved = true; paint(e.clientX, e.clientY); p.x = e.clientX; p.y = e.clientY; return; }
       if (ptrs.size === 1) {
         if (Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > 9) moved = true;
         if (moved) { this.r.cam.x -= (e.clientX - p.x) / this.r.z; this.r.cam.y -= (e.clientY - p.y) / this.r.z; this.r.clampCam(); }
@@ -266,7 +324,8 @@ export class UI {
     });
     const up = (e: PointerEvent) => {
       if (!ptrs.has(e.pointerId)) return;
-      if (ptrs.size === 1 && !moved && this.running && e.type === 'pointerup') this.tap(e.clientX, e.clientY);
+      if (ptrs.size === 1 && this.view.roadMode && this.running) { if (e.type === 'pointerup') commitRoad(); else { this.view.roadDraft.clear(); lastPaint = -1; } }
+      else if (ptrs.size === 1 && !moved && this.running && e.type === 'pointerup') this.tap(e.clientX, e.clientY);
       ptrs.delete(e.pointerId); pinchD = 0;
     };
     cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);

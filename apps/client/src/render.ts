@@ -1,5 +1,5 @@
 import { Application, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
-import { H, SEA_R, TOWNS, W, drought, placeBlock, type BType, type State } from '@bim/sim';
+import { H, SEA_R, TOWNS, W, drought, placeBlock, roadNetwork, type BType, type State } from '@bim/sim';
 import type { GameSession } from './game';
 import { buildingTex, nodeTex, workerTex } from './sprites';
 import { T, bakeOwnership, bakeTerrain } from './terrain';
@@ -10,7 +10,7 @@ export type Selection =
   | { kind: 'node'; id: number }
   | { kind: 'parish'; id: number }
   | null;
-export interface View { sel: Selection; buildMode: BType | null; marks: { x: number; y: number; t: number }[] }
+export interface View { sel: Selection; buildMode: BType | null; marks: { x: number; y: number; t: number }[]; roadMode: boolean; roadDraft: Set<number> }
 
 const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const LABEL_FONT = 'Figtree, system-ui, sans-serif';
@@ -27,6 +27,9 @@ export class Renderer {
   private terrain!: Sprite;
   private own!: Sprite;
   private below = new Graphics();
+  private roadG = new Graphics();
+  private roadVer = -1;
+  private landmarkLabels: { type: 'port' | 'airport'; t: Text }[] = [];
   private nodesL = new Container();
   private bldL = new Container();
   private wrkL = new Container();
@@ -53,7 +56,7 @@ export class Renderer {
     this.TS = dpr >= 1.5 ? 2 : 1.25;
     this.app.stage.addChild(this.world, this.overlay);
     this.bldL.sortableChildren = true; this.wrkL.sortableChildren = true;
-    this.world.addChild(this.below, this.nodesL, this.bldL, this.wrkL, this.above);
+    this.world.addChild(this.roadG, this.below, this.nodesL, this.bldL, this.wrkL, this.above);
     this.setGame(game);
   }
 
@@ -76,6 +79,9 @@ export class Renderer {
     this.parishLabels = s.parishes.map((p) => label(p.name.toUpperCase(), 10.5));
     this.townLabels = TOWNS.map((t) => label(t.n, 10, true, '600'));
     this.agroLabel = label('AGROCORP', 9.5);
+    this.landmarkLabels.forEach((l) => l.t.destroy());
+    this.landmarkLabels = (['port', 'airport'] as const).map((type) => ({ type, t: label(type === 'port' ? 'PORT' : 'AIRPORT', 9.5) }));
+    this.roadVer = -1;
     this.overlay.addChild(this.fx);
   }
 
@@ -101,6 +107,7 @@ export class Renderer {
     if (s.parishVersion !== this.ownVer) {
       bakeOwnership(s, this.TS, this.ownCanvas); this.own.texture.source.update(); this.ownVer = s.parishVersion;
     }
+    if (s.roadVersion !== this.roadVer) { this.drawRoads(s); this.roadVer = s.roadVersion; }
     this.drawBelow(s, view, game);
     this.syncNodes(s);
     this.syncBuildings(s);
@@ -121,6 +128,16 @@ export class Renderer {
       const pts = s.parishes[s.agro.target].poly.map((v) => v * T), pulse = 0.55 + 0.45 * Math.sin(this.time * 5);
       g.poly(pts).fill({ color: 0xe2553f, alpha: 0.12 * pulse }).stroke({ width: 3 / this.z, color: 0xff6a52, alpha: pulse });
     }
+    if (view.roadMode) {
+      // every road in pale, the part your buildings connect to in gold, and the tiles being drawn now
+      const net = roadNetwork(s, game.me);
+      for (let i = 0; i < W * H; i++) if (s.roads[i] && !net[i]) g.rect((i % W) * T + 3, ((i / W) | 0) * T + 3, T - 6, T - 6);
+      g.fill({ color: 0xffffff, alpha: 0.28 });
+      for (let i = 0; i < W * H; i++) if (net[i]) g.rect((i % W) * T + 3, ((i / W) | 0) * T + 3, T - 6, T - 6);
+      g.fill({ color: 0xffc726, alpha: 0.45 });
+      for (const i of view.roadDraft) g.rect((i % W) * T + 2, ((i / W) | 0) * T + 2, T - 4, T - 4);
+      g.fill({ color: 0xeadfbe, alpha: 0.9 });
+    }
     if (view.buildMode) {
       const x0 = Math.max(0, Math.floor(this.cam.x / T) - 1), y0 = Math.max(0, Math.floor(this.cam.y / T) - 1);
       const x1 = Math.min(W - 1, Math.ceil((this.cam.x + this.vw / this.z) / T) + 1), y1 = Math.min(H - 1, Math.ceil((this.cam.y + this.vh / this.z) / T) + 1);
@@ -131,6 +148,38 @@ export class Renderer {
     const showWalls = view.buildMode === 'seawall' || (sel?.kind === 'building' && s.buildings[sel.id]?.type === 'seawall');
     if (showWalls) for (const b of Object.values(s.buildings)) if (b.type === 'seawall' && b.done)
       g.circle((b.x + 0.5) * T, (b.y + 0.5) * T, SEA_R * T).fill({ color: 0x5bc0eb, alpha: 0.08 }).stroke({ width: 1.5, color: 0x5bc0eb, alpha: 0.85 });
+  }
+
+  /** Roads players have built: a coral-stone track joining neighbouring road tiles. Highways are painted into the terrain. */
+  private drawRoads(s: State) {
+    const g = this.roadG; g.clear();
+    const R = (i: number) => s.roads[i] > 0;
+    for (let i = 0; i < W * H; i++) {
+      if (s.roads[i] !== 2) continue;
+      const x = (i % W) + 0.5, y = ((i / W) | 0) + 0.5;
+      for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [1, -1], [-1, 0], [0, -1], [-1, -1], [-1, 1]]) {
+        const nx = (i % W) + dx, ny = ((i / W) | 0) + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H || !R(ny * W + nx)) continue;
+        // join diagonally only when there's no straight route round the corner
+        if (dx && dy && (R(((i / W) | 0) * W + nx) || R(ny * W + (i % W)))) continue;
+        g.moveTo(x * T, y * T).lineTo((x + dx * 0.5) * T, (y + dy * 0.5) * T);
+      }
+    }
+    g.stroke({ width: 0.34 * T, color: 0x3c301c, alpha: 0.3, cap: 'round' });
+    for (let i = 0; i < W * H; i++) if (s.roads[i] === 2) g.circle((i % W + 0.5) * T, ((i / W | 0) + 0.5) * T, 0.17 * T);
+    g.fill({ color: 0xeadfbe });
+    for (let i = 0; i < W * H; i++) {
+      if (s.roads[i] !== 2) continue;
+      const x = (i % W) + 0.5, y = ((i / W) | 0) + 0.5;
+      for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [1, -1], [-1, 0], [0, -1], [-1, -1], [-1, 1]]) {
+        const nx = (i % W) + dx, ny = ((i / W) | 0) + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H || !R(ny * W + nx)) continue;
+        // join diagonally only when there's no straight route round the corner
+        if (dx && dy && (R(((i / W) | 0) * W + nx) || R(ny * W + (i % W)))) continue;
+        g.moveTo(x * T, y * T).lineTo((x + dx * 0.5) * T, (y + dy * 0.5) * T);
+      }
+    }
+    g.stroke({ width: 0.17 * T, color: 0xeadfbe, cap: 'round' });
   }
 
   private syncNodes(s: State) {
@@ -225,6 +274,10 @@ export class Renderer {
     });
     const showTowns = this.z >= 0.6;
     TOWNS.forEach((tw, k) => { const t = this.townLabels[k]; t.visible = showTowns; if (showTowns) { const [x, y] = toS(tw.x, tw.y - tw.s * 0.62 - 0.5); t.position.set(x, y); } });
+    for (const l of this.landmarkLabels) {
+      const b = Object.values(s.buildings).find((q) => q.type === l.type);
+      if (b) { const [x, y] = toS(b.x + 1, b.y + 2); l.t.position.set(x, y + 9); l.t.style.fill = '#CFE8FF'; }
+    }
     const hq = Object.values(s.buildings).find((b) => b.type === 'hq');
     if (hq) { const [x, y] = toS(hq.x + 1, hq.y + 2); this.agroLabel.position.set(x, y + 9); this.agroLabel.style.fill = '#FFB4A6'; }
   }

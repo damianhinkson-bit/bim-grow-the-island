@@ -1,5 +1,6 @@
 import {
-  AGRO, BT, DIFFICULTY, DUES, EAT, NT, RES, STALL, TRAIN, drought, owned, parishBuilt, player, popCap, resourcesOnLand, rivalCost, tcOf, workersOf,
+  AGRO, BOAT_RATE, BT, DIFFICULTY, DUES, EAT, MAX_BOATS, NT, RES, STALL, TOURISM, TRAIN, airportOpen, drought, landmarkHolder, linked, owned, parishBuilt, player, popCap,
+  resourcesOnLand, rivalCost, roadNetwork, tcOf, workersOf,
   type Flow, type Res, type State,
 } from '@bim/sim';
 
@@ -110,6 +111,20 @@ export function dashboardHTML(s: State, me: string, tr: FlowTracker): string {
   const pars = `<section class="dcard"><h4>Parishes</h4><ul class="plist">${prow}</ul>
     <dl class="kv"><dt>AgroCorp holds</dt><dd>${owned(s, AGRO)} of 11</dd><dt>Its next buyout</dt><dd>${s.time < DIFFICULTY[s.difficulty].grace ? `starts saving in ${fmtT(DIFFICULTY[s.difficulty].grace - s.time)}` : Math.min(100, Math.round((s.agro.bbd / rivalCost(s)) * 100)) + '% saved'}${tgt ? ` · <strong>${tgt}</strong>` : ''}</dd></dl>
     <p class="hint">A parish with no buildings of yours can be bought out. Each one you feed pays ${n0(DUES * 60)} BBD a minute.</p></section>`;
+  // ---------- port and airport
+  const roadNet = roadNetwork(s, me);
+  const lm = (t: 'port' | 'airport') => {
+    const ok = linked(s, me, t, roadNet), h = landmarkHolder(s, t);
+    const who = h === me ? 'you' : h === AGRO ? 'AgroCorp' : h ? player(s, h)?.name : 'nobody';
+    return `<dt>${BT[t].name}</dt><dd>${ok ? '<span class="pill good">Connected</span>' : '<span class="pill warn">No road link</span>'}</dd><dt class="sub">Fee goes to</dt><dd class="sub">${who}</dd>`;
+  };
+  const myRoads = s.roads.reduce((a, v) => a + (v === 2 ? 1 : 0), 0);
+  const trade = `<section class="dcard"><h4>Roads and trade</h4><dl class="kv">
+      ${lm('port')}${lm('airport')}
+      <dt>Fishing boats</dt><dd>${p.boats}/${MAX_BOATS}${p.boats ? ` · +${Math.round(p.boats * BOAT_RATE * 60)} food/min` : ''}</dd>
+      ${landmarkHolder(s, 'airport') === me ? `<dt>Tourism</dt><dd>${airportOpen(s) ? `+${Math.round(TOURISM * 60)} BBD/min` : 'airport closed'}</dd>` : ''}
+      <dt>Road tiles built</dt><dd>${myRoads}</dd>
+    </dl><p class="hint">Tap the port or airport on the map to trade. Your Town Centre, a Depot or a Market must connect to it by road.</p></section>`;
   // ---------- threats
   const pests = farms.filter((f) => f.pest > 0).length;
   const threats = `<section class="dcard"><h4>Threats</h4><dl class="kv">
@@ -118,5 +133,5 @@ export function dashboardHTML(s: State, me: string, tr: FlowTracker): string {
       <dt>Pests</dt><dd>${pests ? `${pests} farm${pests > 1 ? 's' : ''} hit` : 'none'}</dd>
     </dl></section>`;
   const sell = p.res.food >= STALL.food && tc ? `<button class="btn" data-act="stall-food">Sell ${STALL.food} food<small>+${STALL.bbd} BBD</small></button>` : '';
-  return `<div class="dgrid">${food}${people}${stock}${workers}${landHTML}${blds}${pars}${threats}</div>${sell ? `<div class="btns dfoot">${sell}</div>` : ''}`;
+  return `<div class="dgrid">${food}${people}${stock}${workers}${landHTML}${trade}${blds}${pars}${threats}</div>${sell ? `<div class="btns dfoot">${sell}</div>` : ''}`;
 }
