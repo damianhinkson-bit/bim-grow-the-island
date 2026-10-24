@@ -231,6 +231,9 @@ Up to **4 players** online, alongside single-player:
 - **AgroCorp difficulty (Easy / Normal / Hard),** chosen on the start screen. It waits out a grace period (6 / 4 / 2 minutes), only buys parishes next to its own land, and announces its target before buying.
 - **Money:** start with 100 BBD; co-op dues are 0.5 BBD/s per parish; a roadside stall at the Town Centre sells 50 food for 20 BBD at any time; the Market costs 80 stone and gives better prices. Tapping the BBD counter explains all of this in the game.
 
+- **Food upkeep:** every worker eats 6 food a minute. When the stockpile can't cover it, all that player's workers work at half speed until food comes in. (This is the first step toward parish demand in section 9.)
+- **Dashboard built:** opened from the bottom bar. It shows food in and out with how long the stock lasts, stockpiles with per-minute rates, housing, worker jobs, resources left on your land, buildings, parish protection, AgroCorp's next target and upcoming threats.
+
 ## 15. Build plan
 
 1. ✅ **Real map:** coastline, parishes, terrain and towns.
