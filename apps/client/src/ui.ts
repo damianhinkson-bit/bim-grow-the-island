@@ -409,6 +409,13 @@ export class UI {
     const dr = drought(s); $('#s-dry').hidden = !dr; if (dr) this.setT('s-dry', `Drought ${fmtT(s.weather.droughtUntil - s.time)}`);
     const mine = s.mode === 'coop' ? teamOwned(s, me.team) : owned(s, me.id);
     this.setT('s-par', `You ${mine}/${winTarget(s)} · AgroCorp ${owned(s, AGRO)}/6`);
+    // online: one dot per player, faded and struck through while they're away
+    const pl = $('#s-players');
+    if (this.game.online) {
+      const html = s.players.map((p) => { const on = this.game.connected?.(p.id) ?? true; return `<span class="pdot${on ? '' : ' off'}" style="background:${p.color}" title="${p.name}${on ? '' : ' (away)'}"></span>`; }).join('');
+      if (this.hudCache['s-players'] !== html) { this.hudCache['s-players'] = html; pl.innerHTML = html; pl.setAttribute('aria-label', 'Players: ' + s.players.map((p) => `${p.name}${(this.game.connected?.(p.id) ?? true) ? '' : ' away'}`).join(', ')); }
+      pl.hidden = false;
+    } else pl.hidden = true;
     $('#s-rival').style.width = Math.min(100, (s.agro.bbd / rivalCost(s)) * 100) + '%';
   }
   drawMini() {
@@ -461,7 +468,7 @@ export class UI {
   private renderDash(force = false) {
     // don't swap the buttons out from under a finger that's pressing one
     if (!force && $('#dash-body').matches(':active, :has(:active)')) return;
-    const h = dashboardHTML(this.s, this.game.me, this.flows);
+    const h = dashboardHTML(this.s, this.game.me, this.flows, (pid) => this.game.connected?.(pid) ?? true);
     if (force || h !== this.lastDash) { $('#dash-body').innerHTML = h; this.lastDash = h; }
   }
   /** Sends each idle worker to the nearest breadfruit tree or fishing spot. */

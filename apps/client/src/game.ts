@@ -16,6 +16,8 @@ export interface GameSession {
   paused: boolean;
   /** True for online games, where pausing is shared and limited. */
   readonly online?: boolean;
+  /** Online only: whether another player is connected right now. */
+  connected?(pid: string): boolean;
 }
 
 export class LocalGame implements GameSession {

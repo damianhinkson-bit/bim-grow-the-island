@@ -50,6 +50,7 @@ async function boot() {
       status: (msg: string | null) => { if (msg) ui.toast(msg, 'warn'); },
       result: (res: { ok: boolean; msg?: string }) => ui.result(res),
       paused: (p: boolean, by: string) => ui.showPaused(p, by),
+      presence: (name: string, connected: boolean) => ui.toast(connected ? `${name} is back.` : `${name} left the game. Their co-op waits for them to come back.`, connected ? 'good' : 'warn'),
     };
   }
   menu.home();

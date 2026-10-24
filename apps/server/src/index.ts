@@ -54,7 +54,7 @@ wss.on('connection', (ws: WebSocket) => {
   });
   ws.on('close', () => lobby.drop(conn));
   // drop sockets that stop answering pings (phone went to sleep, network changed)
-  const ping = setInterval(() => { if (!alive) { ws.terminate(); clearInterval(ping); return; } alive = false; ws.ping(); }, 20_000);
+  const ping = setInterval(() => { if (!alive) { ws.terminate(); clearInterval(ping); return; } alive = false; ws.ping(); }, 10_000);
   ws.on('close', () => clearInterval(ping));
 });
 

@@ -13,8 +13,8 @@ export function serverUrl(): string {
 }
 
 const store = {
-  get(k: string) { try { return sessionStorage.getItem(k); } catch { return null; } },
-  set(k: string, v: string) { try { sessionStorage.setItem(k, v); } catch { /* storage blocked */ } },
+  get(k: string) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k: string, v: string) { try { localStorage.setItem(k, v); } catch { /* storage blocked */ } },
 };
 
 export interface NetHandlers {
@@ -24,6 +24,7 @@ export interface NetHandlers {
   status(msg: string | null): void;
   result(r: CmdResult): void;
   paused(p: boolean, by: string): void;
+  presence(name: string, connected: boolean): void;
 }
 
 /**
@@ -50,6 +51,11 @@ export class NetworkGame implements GameSession {
   constructor(private h: NetHandlers, private name: string) {}
 
   get started() { return !!this.state; }
+  /** Whether a player (by id like 'p2') is connected right now. */
+  connected(pid: string): boolean {
+    const slot = Number(pid.slice(1)) - 1;
+    return this.lobbyInfo?.players.find((p) => p.slot === slot)?.connected ?? true;
+  }
   get alpha() { return Math.min(1, this.acc / DT); }
   get paused() { return this.serverPaused; }
   set paused(_v: boolean) { this.raw({ t: 'pause' }); }
@@ -131,7 +137,17 @@ export class NetworkGame implements GameSession {
         this.code = m.code; this.slot = m.slot; this.token = m.token;
         store.set(`bim:token:${m.code}`, m.token);
         break;
-      case 'lobby': this.lobbyInfo = m.lobby; this.h.lobby(m.lobby, this.slot); break;
+      case 'lobby': {
+        // during a game, lobby updates tell us who dropped out or came back
+        const before = this.lobbyInfo;
+        this.lobbyInfo = m.lobby;
+        if (this.state && before) for (const p of m.lobby.players) {
+          const was = before.players.find((q) => q.slot === p.slot);
+          if (was && was.connected !== p.connected && p.slot !== this.slot) this.h.presence(p.name, p.connected);
+        }
+        this.h.lobby(m.lobby, this.slot);
+        break;
+      }
       case 'start': {
         const first = !this.state;
         this.state = restore(m.snap); this.me = m.you; this.queue = []; this.acc = 0;

@@ -151,3 +151,6 @@ body{background:var(--sea);color:var(--fg);font-family:var(--body);-webkit-user-
 .muted{color:var(--muted);font-weight:400}
 .plist .pbtns{justify-content:flex-start;gap:6px;margin-bottom:6px}
 .plist .pbtns .btn{padding:6px 10px;font-size:12.5px}
+.pdot{width:11px;height:11px;border-radius:50%;border:1.5px solid rgba(255,255,255,.7);position:relative}
+.pdot.off{opacity:.35}
+.pdot.off::after{content:"";position:absolute;left:-2px;right:-2px;top:50%;height:1.5px;background:#fff;transform:rotate(-40deg)}
