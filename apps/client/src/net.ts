@@ -175,7 +175,7 @@ export class NetworkGame implements GameSession {
         const first = !this.state;
         this.state = restore(m.snap); this.me = m.you; this.queue = []; this.acc = 0;
         this.lastSeq = this.state.eventSeq;
-        if (first) this.h.started(this);
+        if (first) { this.h.started(this); if (this.state.tick > 30) this.h.status('The game started while you were away. You\'re in now.'); }
         break;
       }
       case 'tick': this.queue.push(m); break;

@@ -416,6 +416,7 @@ export class UI {
       if (this.hudCache['s-players'] !== html) { this.hudCache['s-players'] = html; pl.innerHTML = html; pl.setAttribute('aria-label', 'Players: ' + s.players.map((p) => `${p.name}${(this.game.connected?.(p.id) ?? true) ? '' : ' away'}`).join(', ')); }
       pl.hidden = false;
     } else pl.hidden = true;
+    $('#s-solo').hidden = !!this.game.online;
     $('#s-rival').style.width = Math.min(100, (s.agro.bbd / rivalCost(s)) * 100) + '%';
   }
   drawMini() {

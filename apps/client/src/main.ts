@@ -53,7 +53,7 @@ async function boot() {
         if (code && /no game|already started|full/i.test(msg)) { try { localStorage.removeItem(`bim:token:${code}`); } catch { /* blocked */ } history.replaceState(null, '', location.pathname); }
         ui.stop(); net = null; menu.home(msg);
       },
-      status: (msg: string | null) => { if (msg) ui.toast(msg, 'warn'); },
+      status: (msg: string | null) => { if (msg) ui.toast(msg, /started/.test(msg) ? 'good' : 'warn'); },
       result: (res: { ok: boolean; msg?: string }) => ui.result(res),
       paused: (p: boolean, by: string) => ui.showPaused(p, by),
       presence: (name: string, connected: boolean) => ui.toast(connected ? `${name} is back and in charge of their co-op.` : `${name} left the game. If they're not back in 2 minutes, the computer will look after their co-op.`, connected ? 'good' : 'warn'),

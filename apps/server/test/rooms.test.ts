@@ -163,7 +163,13 @@ describe('lobby survives phones switching apps', () => {
     lobby.handle(c, { t: 'join', code, name: 'C', v: V });
     lobby.drop(a);
     run(lobby, 70);
+    expect(b.last('lobby')!.lobby.host).toBe(0); // a minute isn't enough: the host is probably just sending the code
+    lobby.handle(b, { t: 'start' });
+    expect(b.last('error')?.msg).toContain('host');
+    run(lobby, 240);
     expect(b.last('lobby')!.lobby.host).toBe(1);
+    lobby.handle(b, { t: 'start' });
+    expect(b.last('error')?.msg).toContain('Waiting for A');
     lobby.handle(c, { t: 'leave' });
     expect(b.last('lobby')!.lobby.players.map((p) => p.name)).toEqual(['A', 'B']);
   });

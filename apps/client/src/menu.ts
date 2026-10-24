@@ -25,17 +25,30 @@ const DIFF_OPTS: [string, string, string][] = [['easy', 'Easy', 'Slow, lots of w
 /** The start screen and the online lobby, drawn into the overlay card. */
 export class Menu {
   private difficulty: Difficulty = 'normal';
-  constructor(private a: MenuActions) {}
+  /** Players seen in the current lobby and when they first appeared. */
+  private seen = new Map<string, number>();
+  private baseTitle = document.title;
+  constructor(private a: MenuActions) {
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(() => (document.title = this.baseTitle), 4000); });
+  }
+  /** Someone joined: buzz the phone and put their name in the tab title, so you notice even from another app. */
+  private arrived(name: string) {
+    try { navigator.vibrate?.([120, 80, 120]); } catch { /* not supported */ }
+    document.title = `${name} joined · Bim`;
+    if (document.visibilityState === 'visible') setTimeout(() => (document.title = this.baseTitle), 5000);
+  }
+  resetLobby() { this.seen.clear(); document.title = this.baseTitle; }
 
   private card() { return $('#card'); }
   show() { $('#overlay').hidden = false; }
   hide() { $('#overlay').hidden = true; }
 
   home(note?: string) {
-    this.show();
+    this.show(); this.resetLobby();
     const params = new URLSearchParams(location.search);
     const code = (params.get('room') ?? '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5);
     const name = store.get('bim:name') ?? '';
+    if (code && ONLINE && !this.soloInstead) { this.invite(code, name, note); return; }
     this.card().innerHTML = `<div class="flag"><i></i><i></i><i></i></div>
       <div class="kicker">Damian Grows presents</div>
       <h1>Bim: Grow the Island</h1>
@@ -86,32 +99,68 @@ export class Menu {
     }
   }
 
+  /** Set when someone opened an invite link but chose to play solo instead. */
+  private soloInstead = false;
+  /** Opened from an invite link: one clear job, joining that game. */
+  private invite(code: string, name: string, note?: string) {
+    this.card().innerHTML = `<div class="flag"><i></i><i></i><i></i></div>
+      <div class="kicker">You're invited to</div>
+      <h1>Bim: Grow the Island</h1>
+      <p class="sub">A friend is waiting for you in their game. Grow food for Barbados together.</p>
+      ${note ? `<p class="note">${esc(note)}</p>` : ''}
+      <div class="kicker">Game code</div>
+      <div class="bigcode">${esc(code)}</div>
+      <label class="field" for="nm">Your name<input id="nm" maxlength="16" autocomplete="nickname" placeholder="e.g. Kemar" value="${esc(name)}"></label>
+      <button class="btn primary big" id="go-join">Join the game</button>
+      <button class="linkbtn" id="go-solo-instead">Play solo instead</button>`;
+    const go = () => {
+      const v = $<HTMLInputElement>('#nm').value.trim();
+      if (!v) { $<HTMLInputElement>('#nm').focus(); $<HTMLInputElement>('#nm').placeholder = 'Type your name first'; return; }
+      store.set('bim:name', v);
+      this.waiting('Joining…'); this.a.join(v, code);
+    };
+    $('#go-join').onclick = go;
+    $<HTMLInputElement>('#nm').onkeydown = (e) => { if (e.key === 'Enter') go(); };
+    $('#go-solo-instead').onclick = () => { this.soloInstead = true; history.replaceState(null, '', location.pathname); this.home(); };
+  }
+
   waiting(msg: string) { this.show(); this.card().innerHTML = `<div class="flag"><i></i><i></i><i></i></div><h1 style="font-size:28px">${esc(msg)}</h1><p class="sub">The server may take up to a minute to wake up the first time.</p><button class="btn" id="m-back">Back</button>`; $('#m-back').onclick = () => { this.a.leave(); this.home(); }; }
 
   lobby(l: LobbyInfo, mySlot: number) {
     this.show();
     const host = l.host === mySlot;
     const link = `${location.origin}${location.pathname}?room=${l.code}`;
+    const canShare = typeof navigator.share === 'function';
+    const modeName = l.mode === 'coop' ? 'Co-op vs AgroCorp' : 'Versus';
+    const away = l.players.filter((p) => !p.connected).map((p) => p.name);
+    // who arrived since the last lobby update: highlight them, and buzz the phone if it's someone else
+    const now = Date.now();
+    for (const p of l.players) if (!this.seen.has(p.name)) { this.seen.set(p.name, now); if (p.slot !== mySlot && this.seen.size > 1) this.arrived(p.name); }
+    const fresh = (n: string) => now - (this.seen.get(n) ?? 0) < 8000 && this.seen.size > 1;
     const seats = Array.from({ length: MAX_PLAYERS }, (_, k) => {
       const p = l.players[k];
-      return p ? `<li><span class="sw" style="background:${p.color}"></span><span>${esc(p.name)}${p.slot === mySlot ? ' <em>(you)</em>' : ''}${p.slot === l.host ? ' <em>· host</em>' : ''}</span>${p.connected ? '' : '<span class="pill warn">offline</span>'}</li>`
+      return p ? `<li${fresh(p.name) && p.slot !== mySlot ? ' class="new"' : ''}><span class="sw" style="background:${p.color}"></span><span>${esc(p.name)}${p.slot === mySlot ? ' <em>(you)</em>' : ''}${p.slot === l.host ? ' <em>· host</em>' : ''}</span>${p.connected ? (fresh(p.name) && p.slot !== mySlot ? '<span class="pill good">just joined</span>' : '') : '<span class="pill warn">offline</span>'}</li>`
         : '<li class="empty"><span class="sw"></span><span>Open seat</span></li>';
     }).join('');
-    const modeName = l.mode === 'coop' ? 'Co-op vs AgroCorp' : 'Versus';
     this.card().innerHTML = `<div class="flag"><i></i><i></i><i></i></div>
       <div class="kicker">Game code</div>
       <div class="bigcode" aria-label="Game code ${l.code.split('').join(' ')}">${l.code}</div>
+      ${canShare ? '<button class="btn primary big" id="share">Share invite</button>' : ''}
       <div class="joinrow"><input id="link" readonly value="${esc(link)}" aria-label="Invite link"><button class="btn" id="copy">Copy link</button></div>
-      <p class="hint">Send the link or read out the code. Friends open the game, tap Play online, and join.</p>
+      <p class="hint">Send the invite. Your friends tap the link and press <strong>Join the game</strong>, or open the game, tap Play online and type the code.</p>
       <ul class="seats">${seats}</ul>
       ${host ? `<div class="kicker">Mode</div>${seg('mode', [['coop', 'Co-op', 'Together vs AgroCorp'], ['versus', 'Versus', 'Race each other']], l.mode)}
         <div class="kicker">AgroCorp difficulty</div>${seg('ldiff', DIFF_OPTS, l.difficulty)}
-        <button class="btn primary" id="m-start"${l.mode === 'versus' && l.players.length < 2 ? ' disabled' : ''}>Start the game</button>`
+        <button class="btn primary" id="m-start"${(l.mode === 'versus' && l.players.length < 2) || away.length ? ' disabled' : ''}>${away.length ? `Waiting for ${esc(away.join(' and '))} to come back…` : 'Start the game'}</button>`
         : `<p class="sub"><strong>${modeName}</strong> · AgroCorp ${DIFFICULTY[l.difficulty].label}. Waiting for the host to start…</p>`}
       <button class="btn ghost" id="m-leave">Leave</button>`;
+    const inviteText = `Join my game of Bim: Grow the Island! Tap the link and press Join (code ${l.code}).`;
+    if (canShare) $('#share').onclick = async () => {
+      try { await navigator.share({ title: 'Bim: Grow the Island', text: inviteText, url: link }); } catch { /* closed the share sheet */ }
+    };
     $('#copy').onclick = async () => {
       const inp = $<HTMLInputElement>('#link');
-      try { await navigator.clipboard.writeText(link); $('#copy').textContent = 'Copied'; }
+      try { await navigator.clipboard.writeText(`${inviteText} ${link}`); $('#copy').textContent = 'Copied'; }
       catch { inp.select(); $('#copy').textContent = 'Select & copy'; }
     };
     if (host) {

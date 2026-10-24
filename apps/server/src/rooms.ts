@@ -11,7 +11,7 @@ const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ'; // no I, L or O: easy to read out lo
 const HASH_EVERY = 50;
 const PAUSE_LIMIT = 3, PAUSE_MAX_S = 60;
 const IDLE_ROOM_MS = 10 * 60 * 1000;
-const LOBBY_SEAT_MS = 10 * 60 * 1000, HOST_HANDOVER_MS = 60 * 1000;
+const LOBBY_SEAT_MS = 10 * 60 * 1000, HOST_HANDOVER_MS = 5 * 60 * 1000;
 const MAX_CMDS_PER_TICK = 25;
 
 interface Slot { name: string; token: string; conn: Conn | null; pauses: number; lastSeen: number; awaySince: number; ai: boolean }
@@ -101,6 +101,8 @@ export class Room {
         if (k !== this.host) return err('Only the host can start the game.');
         if (this.started) return;
         if (this.mode === 'versus' && this.slots.length < 2) return err('Versus needs at least 2 players.');
+        const away = this.slots.filter((s) => !s.conn).map((s) => s.name);
+        if (away.length) return err(`Waiting for ${away.join(' and ')} to come back to the lobby.`);
         this.state = createGame({ seed: randomInt(1, 2 ** 31 - 1), mode: this.mode, difficulty: this.difficulty, players: this.slots.map((s) => ({ name: s.name })) });
         const snap = snapshot(this.state);
         this.slots.forEach((s, j) => s.conn?.send({ t: 'start', snap, you: this.pid(j) }));
