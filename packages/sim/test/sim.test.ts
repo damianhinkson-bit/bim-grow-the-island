@@ -187,3 +187,34 @@ describe('five ages', () => {
     expect(protectedB(s, house)).toBe(true);
   });
 });
+
+describe('online play support', () => {
+  it('restores a snapshot that then plays on identically', async () => {
+    const { snapshot, restore } = await import('../src');
+    const a = createGame({ seed: 11, players: [{ name: 'A' }, { name: 'B' }] });
+    for (let t = 0; t < 900; t++) { for (const p of a.players) for (const c of bot(a, p.id)) applyCommand(a, p.id, c); step(a); }
+    const b = restore(JSON.parse(JSON.stringify(snapshot(a))));
+    expect(stateHash(b)).toBe(stateHash(a));
+    for (let t = 0; t < 900; t++) {
+      for (const p of a.players) { const cs = bot(a, p.id); for (const c of cs) { applyCommand(a, p.id, c); applyCommand(b, p.id, c); } }
+      step(a); step(b);
+    }
+    expect(stateHash(b)).toBe(stateHash(a));
+    expect(b.nodes.filter((n) => n.type === 'spring').every((n) => n.max === Infinity)).toBe(true);
+  });
+  it('trades between players only when both can pay, and gifts only within a co-op team', () => {
+    const s = createGame({ players: [{ name: 'A' }, { name: 'B' }] });
+    const r = applyCommand(s, 'p1', { type: 'offer', to: 'p2', give: { food: 50 }, get: { stone: 30 } });
+    expect(r.ok).toBe(true);
+    const o = s.offers[0];
+    expect(applyCommand(s, 'p1', { type: 'answer', offer: o.id, accept: true }).ok).toBe(false); // only the recipient answers
+    expect(applyCommand(s, 'p2', { type: 'answer', offer: o.id, accept: true }).ok).toBe(true);
+    expect(s.players[0].res).toMatchObject({ food: 150, stone: 150 });
+    expect(s.players[1].res).toMatchObject({ food: 250, stone: 90 });
+    expect(applyCommand(s, 'p1', { type: 'offer', to: 'p2', give: { food: 5000 }, get: {} }).ok).toBe(false);
+    expect(applyCommand(s, 'p1', { type: 'gift', to: 'p2', give: { water: 40 } }).ok).toBe(true);
+    expect(s.players[1].res.water).toBe(140);
+    const v = createGame({ mode: 'versus', players: [{ name: 'A' }, { name: 'B' }] });
+    expect(applyCommand(v, 'p1', { type: 'gift', to: 'p2', give: { water: 40 } }).ok).toBe(false);
+  });
+});

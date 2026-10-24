@@ -7,7 +7,7 @@ import { buildMap, inB, ix, iy } from './map';
 import { toT } from './geo';
 import { findPath, goalTest, passable } from './path';
 import { nextRand } from './rng';
-import type { Building, Flow, GameEvent, Goal, MapData, Mode, Node, Parish, Player, State, Worker } from './types';
+import type { Building, Flow, GameEvent, Goal, MapData, Mode, Node, Offer, Parish, Player, State, Worker } from './types';
 
 // ---------- setup
 
@@ -17,6 +17,8 @@ function staticMap() { return (MAP ??= buildMap()); }
 export interface NewGameOptions { seed?: number; mode?: Mode; difficulty?: Difficulty; players: { name: string }[] }
 
 const rand = (s: State) => nextRand(s);
+/** Distance via sqrt, which every JavaScript engine computes identically (Math.hypot isn't guaranteed to), keeping phones in sync. */
+export const dist = (dx: number, dy: number) => Math.sqrt(dx * dx + dy * dy);
 
 export function createGame(o: NewGameOptions): State {
   const { map, parishes } = staticMap();
@@ -28,7 +30,7 @@ export function createGame(o: NewGameOptions): State {
     nodes: [], nodeAt: new Int32Array(W * H).fill(-1), bAt: new Int32Array(W * H).fill(-1), roads: map.highway.slice(), roadVersion: 1,
     buildings: {}, workers: {}, players: [], difficulty: o.difficulty ?? 'normal', agro: { bbd: 0, target: null, warned: false },
     weather: { nextHurr: 300, hurrWarned: false, nextDrought: 210, droughtUntil: -1, nextPest: 130, stormT: 0, hurrIdx: 0 },
-    events: [], eventSeq: 0, parishVersion: 1, ended: null,
+    events: [], eventSeq: 0, offers: [], parishVersion: 1, ended: null,
   };
   for (let k = 0; k < n; k++) {
     const home = START_PARISHES[n - 1][k];
@@ -48,7 +50,7 @@ export function createGame(o: NewGameOptions): State {
   addBuilding(s, 'hq', hq[0], hq[1], AGRO, true);
   const tcs = s.players.map((p) => { const sp = findSpot(s, p.home); addBuilding(s, 'tc', sp[0], sp[1], p.id, true); return sp; });
   const spots = [hq, ...tcs];
-  const far = (i: number) => spots.every(([x, y]) => Math.hypot(ix(i) - (x + 0.5), iy(i) - (y + 0.5)) > 3.5);
+  const far = (i: number) => spots.every(([x, y]) => dist(ix(i) - (x + 0.5), iy(i) - (y + 0.5)) > 3.5);
   const free = (i: number) => map.land[i] && !map.coast[i] && !map.urban[i] && !s.roads[i] && s.nodeAt[i] < 0 && s.bAt[i] < 0 && far(i);
   // coral stone only on the coral cap (not the Scotland District's clay); springs in the wetter uplands
   const ok: Record<NodeType, (i: number) => boolean> = { tree: () => true, fish: () => true, rock: (i) => map.scot[i] < 0.3, spring: (i) => map.elev[i] > 0.38 };
@@ -74,7 +76,7 @@ export function createGame(o: NewGameOptions): State {
   // guaranteed starting resources around each Town Centre
   s.players.forEach((p, k) => {
     const [tx, ty] = tcs[k];
-    const nearFree = (i: number) => map.land[i] && !map.coast[i] && !map.urban[i] && !s.roads[i] && s.nodeAt[i] < 0 && s.bAt[i] < 0 && Math.hypot(ix(i) - (tx + 0.5), iy(i) - (ty + 0.5)) > 3.5 && map.pid[i] === p.home;
+    const nearFree = (i: number) => map.land[i] && !map.coast[i] && !map.urban[i] && !s.roads[i] && s.nodeAt[i] < 0 && s.bAt[i] < 0 && dist(ix(i) - (tx + 0.5), iy(i) - (ty + 0.5)) > 3.5 && map.pid[i] === p.home;
     const ring = (type: NodeType, rmin: number, rmax: number, cnt: number) => {
       let tries = 0, placed = 0, anch: [number, number] | null = null;
       const cx = tx + 1, cy = ty + 1;
@@ -88,7 +90,7 @@ export function createGame(o: NewGameOptions): State {
     };
     ring('tree', 4, 6, 4); ring('tree', 5, 8, 3); ring('rock', 5, 8, 3); ring('spring', 4, 7, 1);
     for (let i = 0; i < W * H; i++)
-      if (!map.land[i] && map.depth[i] === 1 && s.nodeAt[i] < 0 && Math.hypot(ix(i) - tx, iy(i) - ty) < 9 && rand(s) < 0.45) addNode(s, 'fish', i);
+      if (!map.land[i] && map.depth[i] === 1 && s.nodeAt[i] < 0 && dist(ix(i) - tx, iy(i) - ty) < 9 && rand(s) < 0.45) addNode(s, 'fish', i);
     const tc = tcOf(s, p.id)!;
     for (let w = 0; w < 4; w++) { const t = spawnTile(s, tc); if (t >= 0) spawnWorker(s, t, p.id); }
   });
@@ -115,7 +117,7 @@ function findSpot(s: State, pidx: number): [number, number] {
 function landmarkSpot(s: State, lat: number, lon: number, needCoast: boolean): [number, number] {
   const [tx, ty] = toT(lat, lon), m = s.map;
   const cands: [number, number, number][] = [];
-  for (let y = Math.floor(ty) - 6; y <= ty + 6; y++) for (let x = Math.floor(tx) - 6; x <= tx + 6; x++) cands.push([x, y, Math.hypot(x + 1 - tx, y + 1 - ty)]);
+  for (let y = Math.floor(ty) - 6; y <= ty + 6; y++) for (let x = Math.floor(tx) - 6; x <= tx + 6; x++) cands.push([x, y, dist(x + 1 - tx, y + 1 - ty)]);
   cands.sort((a, b) => a[2] - b[2]);
   let fallback: [number, number] | null = null;
   for (const [x, y] of cands) {
@@ -202,17 +204,17 @@ export function popCap(s: State, owner: string): number {
 export function protectedB(s: State, b: Building): boolean {
   const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
   return Object.values(s.buildings).some((w) => w.done && w !== b && (
-    (w.type === 'seawall' && Math.hypot(w.x + 0.5 - cx, w.y + 0.5 - cy) <= SEA_R) ||
-    (w.type === 'windbreak' && Math.hypot(w.x + 0.5 - cx, w.y + 0.5 - cy) <= WINDBREAK_R)));
+    (w.type === 'seawall' && dist(w.x + 0.5 - cx, w.y + 0.5 - cy) <= SEA_R) ||
+    (w.type === 'windbreak' && dist(w.x + 0.5 - cx, w.y + 0.5 - cy) <= WINDBREAK_R)));
 }
 /** Whether a farm plot has a composter of its owner within reach. */
 export function composted(s: State, b: Building): boolean {
-  return Object.values(s.buildings).some((o) => o.type === 'composter' && o.done && o.owner === b.owner && Math.hypot(o.x - b.x, o.y - b.y) <= COMPOST_R);
+  return Object.values(s.buildings).some((o) => o.type === 'composter' && o.done && o.owner === b.owner && dist(o.x - b.x, o.y - b.y) <= COMPOST_R);
 }
 /** Which player built a road tile (null for highways and empty tiles). */
 export function roadOwner(s: State, i: number): Player | null { const v = s.roads[i]; return v >= 2 ? s.players[v - 2] ?? null : null; }
 export function aquaPowered(s: State, b: Building): boolean {
-  return Object.values(s.buildings).some((o) => o.type === 'solar' && o.done && o.owner === b.owner && Math.hypot(o.x - b.x, o.y - b.y) <= SEA_R);
+  return Object.values(s.buildings).some((o) => o.type === 'solar' && o.done && o.owner === b.owner && dist(o.x - b.x, o.y - b.y) <= SEA_R);
 }
 export function parishBuilt(s: State, p: Parish, owner: string): boolean {
   return Object.values(s.buildings).some((b) => b.owner === owner && b.done && s.map.pid[b.y * W + b.x] === p.id);
@@ -313,7 +315,7 @@ function follow(s: State, w: Worker, dt: number): 'arrived' | 'moving' | 'blocke
   if (!w.path.length) return 'arrived';
   const n = w.path[0];
   if (!passable(s, n)) { w.path = findPath(s, tileOf(w), w.goal); return w.path ? 'moving' : 'blocked'; }
-  const tx = ix(n) + 0.5, ty = iy(n) + 0.5, dx = tx - w.x, dy = ty - w.y, d = Math.hypot(dx, dy), st = SPEED * dt * (s.roads[tileOf(w)] && s.roads[n] ? 2 : 1);
+  const tx = ix(n) + 0.5, ty = iy(n) + 0.5, dx = tx - w.x, dy = ty - w.y, d = dist(dx, dy), st = SPEED * dt * (s.roads[tileOf(w)] && s.roads[n] ? 2 : 1);
   if (Math.abs(dx) > 0.01) w.face = Math.sign(dx);
   if (d <= st) { w.x = tx; w.y = ty; w.path.shift(); } else { w.x += (dx / d) * st; w.y += (dy / d) * st; }
   return w.path.length ? 'moving' : 'arrived';
@@ -380,7 +382,7 @@ function updWorker(s: State, w: Worker, dt: number) {
       if (t.k === 'gather') {
         const type0 = s.nodes[t.n].type;
         const alts = s.nodes.filter((n) => n.type === type0 && n.amt > 0 && n.id !== t.n)
-          .sort((a, z) => Math.hypot(a.x - w.x, a.y - w.y) - Math.hypot(z.x - w.x, z.y - w.y)).slice(0, 6);
+          .sort((a, z) => dist(a.x - w.x, a.y - w.y) - dist(z.x - w.x, z.y - w.y)).slice(0, 6);
         const alt = alts.find((n) => goTo(s, w, rectOf(n)));
         if (alt) { t.n = alt.id; return; }
       }
@@ -449,6 +451,7 @@ export function step(s: State): void {
       me.res.food += food; me.stats.food += food; me.flow.gain.food += food;
     }
   }
+  if (s.offers.length) s.offers = s.offers.filter((o) => s.time - o.t < OFFER_TTL);
   weather(s);
   rival(s, dt);
   checkEnd(s);
@@ -574,11 +577,26 @@ export type Command =
   | { type: 'claim'; parish: number }
   | { type: 'road'; tiles: number[] }
   | { type: 'trade'; at: Landmark; deal: DealId }
-  | { type: 'boat' };
+  | { type: 'boat' }
+  | { type: 'offer'; to: string; give: Partial<Record<Res, number>>; get: Partial<Record<Res, number>> }
+  | { type: 'answer'; offer: number; accept: boolean }
+  | { type: 'gift'; to: string; give: Partial<Record<Res, number>> };
 export interface CmdResult { ok: boolean; msg?: string; building?: number }
 
 const fail = (msg: string): CmdResult => ({ ok: false, msg });
-const near = (a: { x: number; y: number }, x: number, y: number) => Math.hypot(a.x - x, a.y - y);
+export const OFFER_TTL = 60;
+/** Whole, positive amounts of known resources only; null if anything is off. */
+function cleanAmounts(c: unknown): Partial<Record<Res, number>> | null {
+  if (!c || typeof c !== 'object') return null;
+  const out: Partial<Record<Res, number>> = {};
+  for (const [k, v] of Object.entries(c as Record<string, unknown>)) {
+    if (!(RES as string[]).includes(k)) return null;
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 100000) return null;
+    const n = Math.floor(v); if (n > 0) out[k as Res] = n;
+  }
+  return out;
+}
+const near = (a: { x: number; y: number }, x: number, y: number) => dist(a.x - x, a.y - y);
 
 /** Applies one player's command. Every rule check lives here, so the server can trust nothing from clients. */
 export function applyCommand(s: State, pid: string, c: Command): CmdResult {
@@ -686,6 +704,39 @@ export function applyCommand(s: State, pid: string, c: Command): CmdResult {
       spend(me, BOAT_COST); me.boats++; emit(s, 'good', `Fishing boat launched. Each boat lands ${Math.round(BOAT_RATE * 60)} flying fish a minute.`, pid);
       return { ok: true };
     }
+    case 'offer': {
+      const other = player(s, c.to); if (!other || other.id === pid) return fail('Pick another player to trade with.');
+      const give = cleanAmounts(c.give), get = cleanAmounts(c.get);
+      if (!give || !get || (!Object.keys(give).length && !Object.keys(get).length)) return fail('Set what you give and what you want.');
+      if (!canAfford(me.res, give)) return fail(`You don't have ${fmtCost(give)} to offer.`);
+      if (s.offers.filter((o) => o.from === pid).length >= 3) return fail('You already have 3 open offers. Wait for answers first.');
+      const o: Offer = { id: s.nextId++, from: pid, to: other.id, give, get, t: s.time };
+      s.offers.push(o);
+      emit(s, 'info', `${me.name} offers ${fmtCost(give) || 'nothing'} for your ${fmtCost(get) || 'nothing'}. Open the dashboard to answer.`, other.id);
+      return { ok: true, msg: `Offer sent to ${other.name}.` };
+    }
+    case 'answer': {
+      const o = s.offers.find((x) => x.id === c.offer && x.to === pid); if (!o) return fail('That offer has expired.');
+      s.offers = s.offers.filter((x) => x !== o);
+      const from = player(s, o.from);
+      if (!from) return fail('That player has left.');
+      if (!c.accept) { emit(s, 'info', `${me.name} declined your offer.`, from.id); return { ok: true }; }
+      if (!canAfford(from.res, o.give)) { emit(s, 'warn', `${from.name} no longer has ${fmtCost(o.give)}.`, pid); return fail(`${from.name} can't cover the trade any more.`); }
+      if (!canAfford(me.res, o.get)) return fail(`You need ${fmtCost(o.get)} to accept.`);
+      spend(from, o.give); spend(me, o.get);
+      for (const k of RES) { if (o.give[k]) earn(me, k, o.give[k]!); if (o.get[k]) earn(from, k, o.get[k]!); }
+      emit(s, 'good', `${me.name} accepted your trade.`, from.id);
+      return { ok: true, msg: 'Trade done.' };
+    }
+    case 'gift': {
+      const other = player(s, c.to); if (!other || other.id === pid) return fail('Pick a teammate.');
+      if (other.team !== me.team) return fail('Gifts are only for teammates in a co-op game. Offer a trade instead.');
+      const give = cleanAmounts(c.give); if (!give || !Object.keys(give).length) return fail('Choose what to send.');
+      if (!canAfford(me.res, give)) return fail(`You don't have ${fmtCost(give)}.`);
+      spend(me, give); for (const k of RES) if (give[k]) earn(other, k, give[k]!);
+      emit(s, 'good', `${me.name} sent you ${fmtCost(give)}.`, other.id);
+      return { ok: true, msg: `Sent ${fmtCost(give)} to ${other.name}.` };
+    }
     case 'claim': {
       const p = s.parishes[c.parish]; if (!p) return fail('Unknown parish.');
       const r = claimBlock(s, pid, p); if (r) return fail(r);
@@ -707,5 +758,29 @@ export function stateHash(s: State): string {
   for (const w of Object.values(s.workers)) { mix(w.id); mix(w.x); mix(w.y); mix(w.amt); }
   for (const b of Object.values(s.buildings)) { mix(b.id); mix(b.hp); mix(b.progress); }
   for (const p of s.parishes) mix(p.owner ? p.owner.charCodeAt(p.owner.length - 1) : 0);
+  for (const n of s.nodes) mix(n.amt === Infinity ? -1 : n.amt);
+  mix(s.offers.length);
   return (h >>> 0).toString(16);
+}
+
+// ---------- snapshots (for joining, rejoining and resyncing online games)
+
+export interface Snapshot { v: 1; state: Omit<State, 'map' | 'parishes' | 'nodeAt' | 'bAt' | 'roads'> & { owners: (string | null)[]; nodeAt: number[]; bAt: number[]; roads: number[] } }
+
+/** A JSON-safe copy of everything that changes during a game. The map itself is rebuilt from the same data on every machine. */
+export function snapshot(s: State): Snapshot {
+  const { map: _m, parishes, nodeAt, bAt, roads, ...rest } = s;
+  void _m;
+  return { v: 1, state: JSON.parse(JSON.stringify({ ...rest, owners: parishes.map((p) => p.owner), nodeAt: Array.from(nodeAt), bAt: Array.from(bAt), roads: Array.from(roads) })) };
+}
+export function restore(snap: Snapshot): State {
+  const { map, parishes } = staticMap();
+  const { owners, nodeAt, bAt, roads, ...rest } = snap.state;
+  // JSON turns Infinity (a spring's endless water) into null
+  for (const n of rest.nodes) { if (n.max === null) n.max = Infinity; if (n.amt === null) n.amt = Infinity; }
+  return {
+    ...(rest as Omit<State, 'map' | 'parishes' | 'nodeAt' | 'bAt' | 'roads'>),
+    map, parishes: parishes.map((p, k) => ({ ...p, owner: owners[k] ?? null })),
+    nodeAt: Int32Array.from(nodeAt), bAt: Int32Array.from(bAt), roads: Uint8Array.from(roads),
+  };
 }

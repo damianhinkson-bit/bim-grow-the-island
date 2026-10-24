@@ -44,6 +44,9 @@ export interface GameEvent { seq: number; t: number; kind: 'info' | 'warn' | 'ba
 
 export type Mode = 'coop' | 'versus';
 
+/** A trade one player offers another: `from` gives `give`, receives `get`. Open until answered or 60 s pass. */
+export interface Offer { id: number; from: string; to: string; give: Partial<Record<Res, number>>; get: Partial<Record<Res, number>>; t: number }
+
 export interface Outcome { winners: string[]; reason: string }
 
 export interface State {
@@ -64,6 +67,7 @@ export interface State {
   agro: { bbd: number; target: number | null; warned: boolean };
   weather: { nextHurr: number; hurrWarned: boolean; nextDrought: number; droughtUntil: number; nextPest: number; stormT: number; hurrIdx: number };
   events: GameEvent[]; eventSeq: number;
+  offers: Offer[];
   /** Bumps whenever parish ownership changes, so renderers know to redraw borders. */
   parishVersion: number;
   ended: Outcome | null;
