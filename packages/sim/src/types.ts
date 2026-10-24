@@ -5,7 +5,8 @@ export interface MapData {
   land: Uint8Array; coast: Uint8Array; pid: Int8Array; depth: Uint8Array; urban: Uint8Array; elev: Float32Array; scot: Float32Array;
 }
 
-export interface Node { id: number; type: NodeType; i: number; x: number; y: number; amt: number; max: number }
+/** pid: the parish the resource belongs to (for fish, the parish of the nearest shore). */
+export interface Node { id: number; type: NodeType; i: number; x: number; y: number; amt: number; max: number; pid: number }
 
 export interface Building {
   id: number; type: BType; x: number; y: number; w: number; h: number; owner: string;
@@ -25,7 +26,13 @@ export interface Worker {
 export interface Player {
   id: string; name: string; color: string; team: number; home: number;
   res: Record<Res, number>; age: number; ageT: number; stats: { food: number };
+  /** True when the stockpile can't feed the workers: they then work at half speed. */
+  hungry: boolean;
+  /** Running totals since the game began, so the dashboard can show rates per minute. */
+  flow: Flow;
 }
+
+export interface Flow { gain: Record<Res, number>; upkeep: Record<Res, number>; spent: Record<Res, number>; eaten: number }
 
 export interface Parish { id: number; name: string; poly: number[]; owner: string | null; tiles: number[]; adj: number[]; lx: number; ly: number }
 

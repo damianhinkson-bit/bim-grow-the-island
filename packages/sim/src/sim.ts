@@ -1,12 +1,12 @@
 import {
-  AGE_COST, AGE_T, AGRO, AGRO_HOME, BT, CARRY, DIFFICULTY, DT, DUES, H, HNAMES, STALL, MAX_PLAYERS, NT, PLAYER_COLORS, SEA_R, SPEED, START_PARISHES, START_RES,
+  AGE_COST, AGE_T, AGRO, AGRO_HOME, BT, CARRY, DIFFICULTY, DT, DUES, EAT, RES, H, HNAMES, STALL, MAX_PLAYERS, NT, PLAYER_COLORS, SEA_R, SPEED, START_PARISHES, START_RES,
   TRAIN, TRAIN_COST, W, WIN_N, canAfford, fmtCost, pay,
   type BType, type Difficulty, type NodeType, type Res,
 } from './defs';
 import { buildMap, inB, ix, iy } from './map';
 import { findPath, goalTest, passable } from './path';
 import { nextRand } from './rng';
-import type { Building, GameEvent, Goal, MapData, Mode, Node, Parish, Player, State, Worker } from './types';
+import type { Building, Flow, GameEvent, Goal, MapData, Mode, Node, Parish, Player, State, Worker } from './types';
 
 // ---------- setup
 
@@ -33,7 +33,7 @@ export function createGame(o: NewGameOptions): State {
     const home = START_PARISHES[n - 1][k];
     s.players.push({
       id: `p${k + 1}`, name: o.players[k]?.name || `Player ${k + 1}`, color: PLAYER_COLORS[k], team: s.mode === 'coop' ? 0 : k, home,
-      res: { ...START_RES }, age: 1, ageT: -1, stats: { food: 0 },
+      res: { ...START_RES }, age: 1, ageT: -1, stats: { food: 0 }, hungry: false, flow: newFlow(),
     });
     s.parishes[home].owner = `p${k + 1}`;
   }
@@ -106,10 +106,27 @@ function findSpot(s: State, pidx: number): [number, number] {
   return [ix(c[0]), iy(c[0])];
 }
 
+// ---------- stockpile bookkeeping
+
+function newFlow(): Flow {
+  const z = () => ({ food: 0, water: 0, stone: 0, bbd: 0 });
+  return { gain: z(), upkeep: z(), spent: z(), eaten: 0 };
+}
+function spend(p: Player, c: Partial<Record<Res, number>>) { for (const k of RES) { const v = c[k] ?? 0; p.res[k] -= v; p.flow.spent[k] += v; } }
+function earn(p: Player, r: Res, v: number) { p.res[r] += v; p.flow.gain[r] += v; }
+function shoreParish(s: State, i: number): number {
+  if (s.map.land[i]) return s.map.pid[i];
+  const x = ix(i), y = iy(i);
+  for (let r = 1; r <= 2; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    const nx = x + dx, ny = y + dy; if (!inB(nx, ny)) continue; const j = ny * W + nx; if (s.map.land[j]) return s.map.pid[j];
+  }
+  return -1;
+}
+
 // ---------- entities
 
 export function addNode(s: State, type: NodeType, i: number): Node {
-  const n: Node = { id: s.nodes.length, type, i, x: ix(i), y: iy(i), amt: NT[type].max, max: NT[type].max };
+  const n: Node = { id: s.nodes.length, type, i, x: ix(i), y: iy(i), amt: NT[type].max, max: NT[type].max, pid: shoreParish(s, i) };
   s.nodes.push(n); s.nodeAt[i] = n.id; return n;
 }
 function removeNode(s: State, n: Node) { n.amt = 0; if (s.nodeAt[n.i] === n.id) s.nodeAt[n.i] = -1; }
@@ -163,6 +180,15 @@ export function aquaPowered(s: State, b: Building): boolean {
 }
 export function parishBuilt(s: State, p: Parish, owner: string): boolean {
   return Object.values(s.buildings).some((b) => b.owner === owner && b.done && s.map.pid[b.y * W + b.x] === p.id);
+}
+/** What's left to gather on a player's land: count and amount per resource type. */
+export function resourcesOnLand(s: State, owner: string): Record<NodeType, { count: number; left: number }> {
+  const out = { tree: { count: 0, left: 0 }, fish: { count: 0, left: 0 }, rock: { count: 0, left: 0 }, spring: { count: 0, left: 0 } };
+  for (const n of s.nodes) {
+    if (n.amt <= 0 || n.pid < 0 || s.parishes[n.pid].owner !== owner) continue;
+    out[n.type].count++; if (n.max !== Infinity) out[n.type].left += n.amt;
+  }
+  return out;
 }
 export function rivalCost(s: State) { return 80 + 70 * owned(s, AGRO); }
 export function claimCost(s: State, pid: string, p: Parish) {
@@ -251,6 +277,7 @@ function nearestDrop(s: State, owner: string, x: number, y: number): Building | 
 function updWorker(s: State, w: Worker, dt: number) {
   const t = w.task; if (!t) return;
   const me = player(s, w.owner)!;
+  if (me.hungry) dt *= 0.5;
   if (t.k === 'move') { if (follow(s, w, dt) !== 'moving') setIdle(s, w); return; }
   if (t.k === 'build') {
     const b = s.buildings[t.b]; if (!b) { setIdle(s, w); return; }
@@ -285,7 +312,7 @@ function updWorker(s: State, w: Worker, dt: number) {
     if (w.carry !== type) { w.carry = type; w.amt = 0; }
     let g = rate * dt;
     if (t.k === 'gather') { const n = s.nodes[t.n]; g = Math.min(g, n.amt); n.amt -= g; if (n.amt <= 0) removeNode(s, n); }
-    else { const use = g * 0.25 * (drought(s) ? 1.5 : 1); if (me.res.water < use) g *= 0.4; else me.res.water -= use; }
+    else { const use = g * 0.25 * (drought(s) ? 1.5 : 1); if (me.res.water < use) g *= 0.4; else { me.res.water -= use; me.flow.upkeep.water += use; } }
     w.amt += g; w.working = true;
     if (w.amt >= CARRY || (t.k === 'gather' && s.nodes[t.n].amt <= 0)) { w.phase = 'drop'; w.path = null; }
     return;
@@ -296,7 +323,7 @@ function updWorker(s: State, w: Worker, dt: number) {
       w.dropB = d.id; if (!goTo(s, w, rectOf(d))) { setIdle(s, w); return; }
     }
     const r = follow(s, w, dt);
-    if (r === 'arrived') { if (w.carry) { me.res[w.carry] += w.amt; if (w.carry === 'food') me.stats.food += w.amt; } w.amt = 0; w.phase = 'to'; w.path = null; }
+    if (r === 'arrived') { if (w.carry) { me.res[w.carry] += w.amt; me.flow.gain[w.carry] += w.amt; if (w.carry === 'food') me.stats.food += w.amt; } w.amt = 0; w.phase = 'to'; w.path = null; }
     else if (r === 'blocked') w.path = null;
   }
 }
@@ -319,17 +346,23 @@ export function step(s: State): void {
       p.ageT += dt;
       if (p.ageT >= AGE_T) { p.ageT = -1; p.age = 2; emit(s, 'good', 'Co-op Age reached. Aquaponics and solar unlocked.', p.id); }
     }
-    p.res.bbd += DUES * owned(s, p.id) * dt;
+    const dues = DUES * owned(s, p.id) * dt; p.res.bbd += dues; p.flow.gain.bbd += dues;
+    // everyone eats; an empty stockpile means hungry workers at half speed
+    const need = EAT * workersOf(s, p.id).length * dt, ate = Math.min(need, Math.max(0, p.res.food));
+    p.res.food -= ate; p.flow.eaten += ate;
+    const hungry = ate < need - 1e-9;
+    if (hungry && !p.hungry) emit(s, 'bad', 'Your people are out of food and work at half speed. Gather breadfruit or fish, or farm.', p.id);
+    p.hungry = hungry;
   }
   for (const b of Object.values(s.buildings)) {
     if (b.pest > 0) b.pest -= dt;
     if (!b.done) continue;
     const me = player(s, b.owner); if (!me) continue;
-    if (b.type === 'cistern' && !drought(s)) me.res.water += 0.5 * dt;
+    if (b.type === 'cistern' && !drought(s)) { me.res.water += 0.5 * dt; me.flow.gain.water += 0.5 * dt; }
     if (b.type === 'aqua') {
       const f = aquaPowered(s, b) ? 1 : 0.5, use = 0.5 * f * dt;
-      const food = me.res.water >= use ? ((me.res.water -= use), 2 * f * dt) : 0.6 * f * dt;
-      me.res.food += food; me.stats.food += food;
+      const food = me.res.water >= use ? ((me.res.water -= use), (me.flow.upkeep.water += use), 2 * f * dt) : 0.6 * f * dt;
+      me.res.food += food; me.stats.food += food; me.flow.gain.food += food;
     }
   }
   weather(s);
@@ -482,7 +515,7 @@ export function applyCommand(s: State, pid: string, c: Command): CmdResult {
       const d = BT[c.building]; if (!d || c.building === 'tc' || c.building === 'hq') return fail('Unknown building.');
       const r = placeBlock(s, pid, c.building, c.x, c.y); if (r) return fail(r);
       if (!canAfford(me.res, d.cost)) return fail(`Not enough for a ${d.name}: needs ${fmtCost(d.cost)}.`);
-      pay(me.res, d.cost);
+      spend(me, d.cost);
       const b = addBuilding(s, c.building, c.x, c.y, pid, false);
       let ws = mine(c.workers);
       if (!ws.length) {
@@ -497,36 +530,36 @@ export function applyCommand(s: State, pid: string, c: Command): CmdResult {
       const b = s.buildings[c.building]; if (!b || b.owner !== pid || b.type !== 'tc') return fail('Train workers at your Town Centre.');
       if (b.queue >= 5) return fail('The training queue is full.');
       if (!canAfford(me.res, TRAIN_COST)) return fail('Training a worker needs 50 food.');
-      pay(me.res, TRAIN_COST); b.queue++; return { ok: true };
+      spend(me, TRAIN_COST); b.queue++; return { ok: true };
     }
     case 'age': {
       if (me.age >= 2 || me.ageT >= 0) return fail('Already advancing.');
       if (!canAfford(me.res, AGE_COST)) return fail(`The Co-op Age needs ${fmtCost(AGE_COST)}.`);
-      pay(me.res, AGE_COST); me.ageT = 0; emit(s, 'info', 'Your co-op is organising. Co-op Age in 40s.', pid); return { ok: true };
+      spend(me, AGE_COST); me.ageT = 0; emit(s, 'info', 'Your co-op is organising. Co-op Age in 40s.', pid); return { ok: true };
     }
     case 'market': {
       if (c.trade === 'stall-food') {
         if (!tcOf(s, pid)) return fail('You need a Town Centre.');
         if (me.res.food < STALL.food) return fail(`Selling at the stall needs ${STALL.food} food.`);
-        me.res.food -= STALL.food; me.res.bbd += STALL.bbd; return { ok: true };
+        spend(me, { food: STALL.food }); earn(me, 'bbd', STALL.bbd); return { ok: true };
       }
       if (!Object.values(s.buildings).some((b) => b.owner === pid && b.type === 'market' && b.done)) return fail('You need a Market first.');
-      if (c.trade === 'sell-food') { if (me.res.food < 100) return fail('Not enough food.'); me.res.food -= 100; me.res.bbd += 50; }
-      else if (c.trade === 'sell-stone') { if (me.res.stone < 100) return fail('Not enough stone.'); me.res.stone -= 100; me.res.bbd += 40; }
-      else { if (me.res.bbd < 50) return fail('Not enough BBD.'); me.res.bbd -= 50; me.res.water += 100; }
+      if (c.trade === 'sell-food') { if (me.res.food < 100) return fail('Not enough food.'); spend(me, { food: 100 }); earn(me, 'bbd', 50); }
+      else if (c.trade === 'sell-stone') { if (me.res.stone < 100) return fail('Not enough stone.'); spend(me, { stone: 100 }); earn(me, 'bbd', 40); }
+      else { if (me.res.bbd < 50) return fail('Not enough BBD.'); spend(me, { bbd: 50 }); earn(me, 'water', 100); }
       return { ok: true };
     }
     case 'repair': {
       const b = s.buildings[c.building]; if (!b || b.owner !== pid || !b.done) return fail("That isn't your building.");
       const cost = Math.ceil((b.maxHp - b.hp) * 0.25); if (cost <= 0) return fail('Nothing to repair.');
       if (me.res.stone < cost) return fail(`Repairing needs ${cost} stone.`);
-      me.res.stone -= cost; b.hp = b.maxHp; return { ok: true };
+      spend(me, { stone: cost }); b.hp = b.maxHp; return { ok: true };
     }
     case 'claim': {
       const p = s.parishes[c.parish]; if (!p) return fail('Unknown parish.');
       const r = claimBlock(s, pid, p); if (r) return fail(r);
       const cost = claimCost(s, pid, p); if (!canAfford(me.res, cost)) return fail(`Feeding ${p.name} needs ${fmtCost(cost)}.`);
-      const was = p.owner; pay(me.res, cost); setOwner(s, p, pid);
+      const was = p.owner; spend(me, cost); setOwner(s, p, pid);
       emit(s, 'good', `${p.name} is fed by your co-op now. Put a building there so it can't be bought out.`, pid);
       if (was && was !== AGRO) emit(s, 'bad', `${me.name} won ${p.name} from you.`, was);
       checkEnd(s); return { ok: true };

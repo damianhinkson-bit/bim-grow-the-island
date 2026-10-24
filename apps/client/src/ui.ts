@@ -3,6 +3,7 @@ import {
   parishBuilt, player, popCap, protectedB, rivalCost, tcOf, teamOwned, winTarget, workersOf,
   type BType, type Command, type Difficulty, type State, type Worker,
 } from '@bim/sim';
+import { FlowTracker, dashboardHTML } from './dashboard';
 import type { GameSession } from './game';
 import type { Renderer, View } from './render';
 import { T } from './terrain';
@@ -20,13 +21,17 @@ export class UI {
   private idleIdx = 0;
   private hudCache: Record<string, string> = {};
   private panel = $('#panel');
+  private flows = new FlowTracker();
+  private dashOpen = false;
+  private dashT = 0;
+  private lastDash = '';
   private mini = $<HTMLCanvasElement>('#mini');
   running = false;
 
   constructor(private game: GameSession, private r: Renderer, private onStart: (d: Difficulty) => void) {
-    this.bindPanel(); this.bindBar(); this.bindInput(); this.bindKeys(); this.bindStart();
+    this.bindPanel(); this.bindBar(); this.bindInput(); this.bindKeys(); this.bindStart(); this.bindDash();
   }
-  setGame(game: GameSession) { this.game = game; this.view = { sel: null, buildMode: null, marks: [] }; this.menu = null; this.lastPanel = ''; this.hudCache = {}; }
+  setGame(game: GameSession) { this.flows.reset(); this.closeDash(); this.game = game; this.view = { sel: null, buildMode: null, marks: [] }; this.menu = null; this.lastPanel = ''; this.hudCache = {}; }
 
   private get s(): State { return this.game.state; }
   private get me() { return player(this.s, this.game.me)!; }
@@ -49,6 +54,8 @@ export class UI {
     this.view.marks = this.view.marks.filter((m) => m.t > 0);
     for (const e of this.game.newEvents()) this.toast(e.msg, e.kind === 'info' ? undefined : e.kind);
     this.hud();
+    this.flows.sample(this.s, this.game.me);
+    if (this.dashOpen) { this.dashT -= dt; if (this.dashT <= 0) { this.dashT = 0.5; this.renderDash(); } }
     this.panelT -= dt; if (this.panelT <= 0) { this.panelT = 0.25; this.renderPanel(); }
     this.miniT -= dt; if (this.miniT <= 0) { this.miniT = 0.3; this.drawMini(); }
     if (this.s.ended && this.running) this.end();
@@ -228,7 +235,7 @@ export class UI {
   private bindKeys() {
     addEventListener('keydown', (e) => {
       if (!this.running) return;
-      if (e.key === 'Escape') this.act('deselect');
+      if (e.key === 'Escape') { if (this.dashOpen) this.closeDash(); else this.act('deselect'); }
       if (e.key === 'b') this.act('build');
       if (e.key === ' ') { e.preventDefault(); $('#b-pause').click(); }
     });
@@ -305,6 +312,48 @@ export class UI {
     el.className = 'toast' + (kind ? ' ' + kind : ''); el.textContent = msg; box.appendChild(el);
     while (box.children.length > 3) box.firstChild!.remove();
     setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 320); }, 4500);
+  }
+
+  // ---------- dashboard
+  private bindDash() {
+    $('#b-dash').onclick = () => { if (this.running) (this.dashOpen ? this.closeDash() : this.openDash()); };
+    $('#dash-close').onclick = () => this.closeDash();
+    const body = $('#dash-body');
+    // act on pointerdown (and keyboard click) so the twice-a-second refresh can't swallow a tap
+    const handle = (e: Event) => {
+      const b = (e.target as HTMLElement).closest('button'); if (!b || b.disabled) return;
+      const a = b.dataset.act!;
+      if (a === 'dash-house') { this.closeDash(); this.act('place:house'); return; }
+      if (a === 'dash-train') { const tc = tcOf(this.s, this.game.me); if (tc) this.send({ type: 'train', building: tc.id }); }
+      else if (a === 'dash-idle') this.idleToFood();
+      else if (a === 'stall-food') this.send({ type: 'market', trade: 'stall-food' });
+      this.renderDash(true);
+    };
+    let downY = 0;
+    body.addEventListener('pointerdown', (e) => { downY = e.clientY; });
+    // fire on release only if the finger didn't scroll the sheet
+    body.addEventListener('pointerup', (e) => { if (Math.abs(e.clientY - downY) < 10) handle(e); });
+    body.addEventListener('click', (e) => { if (e.detail === 0) handle(e); });
+  }
+  private openDash() { this.dashOpen = true; $('#dash').hidden = false; $('#b-dash').classList.add('on'); this.renderDash(true); }
+  private closeDash() { this.dashOpen = false; $('#dash').hidden = true; $('#b-dash').classList.remove('on'); }
+  private renderDash(force = false) {
+    // don't swap the buttons out from under a finger that's pressing one
+    if (!force && $('#dash-body').matches(':active, :has(:active)')) return;
+    const h = dashboardHTML(this.s, this.game.me, this.flows);
+    if (force || h !== this.lastDash) { $('#dash-body').innerHTML = h; this.lastDash = h; }
+  }
+  /** Sends each idle worker to the nearest breadfruit tree or fishing spot. */
+  private idleToFood() {
+    const s = this.s;
+    for (const w of workersOf(s, this.game.me).filter((x) => !x.task)) {
+      let best = -1, bd = Infinity;
+      for (const n of s.nodes) {
+        if (n.amt <= 0 || (n.type !== 'tree' && n.type !== 'fish')) continue;
+        const d = Math.hypot(n.x + 0.5 - w.x, n.y + 0.5 - w.y); if (d < bd) { bd = d; best = n.id; }
+      }
+      if (best >= 0) this.send({ type: 'gather', workers: [w.id], node: best });
+    }
   }
 
   // ---------- start / end

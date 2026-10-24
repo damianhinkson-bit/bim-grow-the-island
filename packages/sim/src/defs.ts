@@ -34,6 +34,8 @@ export const BUILD_LIST: BType[] = ['house', 'farm', 'depot', 'cistern', 'seawal
 export const AGE_COST: Cost = { food: 400, water: 150, stone: 200, bbd: 150 };
 export const TRAIN_COST: Cost = { food: 50 };
 export const START_RES: Record<Res, number> = { food: 200, water: 100, stone: 120, bbd: 100 };
+/** Food each worker eats per second (6 a minute). */
+export const EAT = 0.1;
 /** BBD per second each parish you feed pays in co-op dues. */
 export const DUES = 0.5;
 /** Selling at the Town Centre's roadside stall: always available, worse rate than the Market. */
