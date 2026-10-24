@@ -1,0 +1,13 @@
+{
+  "name": "@bim/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:single": "vite build --mode single"
+  },
+  "dependencies": { "@bim/sim": "0.1.0", "pixi.js": "8.9.2" },
+  "devDependencies": { "vite": "6.3.5", "vite-plugin-singlefile": "2.2.0" }
+}
