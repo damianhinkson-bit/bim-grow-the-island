@@ -1,5 +1,5 @@
 import { H, W } from './defs';
-import { GEO, TOWNS, heightAt, inPolyF, scotAt } from './geo';
+import { GEO, ROADS, TOWNS, heightAt, inPolyF, scotAt, type Pt } from './geo';
 import type { MapData, Parish } from './types';
 
 export const ix = (i: number) => i % W;
@@ -53,5 +53,22 @@ export function buildMap(): { map: MapData; parishes: Parish[] } {
     for (let y = Math.floor(t.y - r); y <= t.y + r; y++) for (let x = Math.floor(t.x - r); x <= t.x + r; x++)
       if (inB(x, y) && Math.hypot(x + 0.5 - t.x, y + 0.5 - t.y) <= r) urban[y * W + x] = 1;
   }
-  return { map: { land, coast, pid, depth, urban, elev, scot }, parishes };
+  const highway = new Uint8Array(W * H);
+  const mark = (x: number, y: number) => { const tx = Math.floor(x), ty = Math.floor(y); if (inB(tx, ty) && land[ty * W + tx]) highway[ty * W + tx] = 1; };
+  for (const r of ROADS) for (const [x, y] of roadCurve(r, 0.15)) mark(x, y);
+  return { map: { land, coast, pid, depth, urban, elev, scot, highway }, parishes };
+}
+
+/** Points along a road drawn as a smooth curve through the midpoints of its control points (same curve the renderer paints). */
+export function roadCurve(pts: Pt[], stepTiles: number): Pt[] {
+  const out: Pt[] = [];
+  const seg = (a: Pt, c: Pt, b: Pt) => {
+    const len = Math.hypot(c[0] - a[0], c[1] - a[1]) + Math.hypot(b[0] - c[0], b[1] - c[1]);
+    const n = Math.max(2, Math.ceil(len / stepTiles));
+    for (let k = 0; k <= n; k++) { const t = k / n, u = 1 - t; out.push([u * u * a[0] + 2 * u * t * c[0] + t * t * b[0], u * u * a[1] + 2 * u * t * c[1] + t * t * b[1]]); }
+  };
+  let cur = pts[0];
+  for (let k = 1; k < pts.length - 1; k++) { const mid: Pt = [(pts[k][0] + pts[k + 1][0]) / 2, (pts[k][1] + pts[k + 1][1]) / 2]; seg(cur, pts[k], mid); cur = mid; }
+  const last = pts[pts.length - 1]; seg(cur, [(cur[0] + last[0]) / 2, (cur[1] + last[1]) / 2], last);
+  return out;
 }

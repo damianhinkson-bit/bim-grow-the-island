@@ -3,7 +3,7 @@ import { inB, ix, iy } from './map';
 import type { Goal, State } from './types';
 
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] as const;
-const prevBuf = new Int32Array(W * H), qBuf = new Int32Array(W * H), seen = new Int32Array(W * H);
+const prevBuf = new Int32Array(W * H), seen = new Int32Array(W * H);
 let stamp = 0;
 
 export function passable(s: State, i: number): boolean { return s.map.land[i] === 1 && s.nodeAt[i] < 0 && s.bAt[i] < 0; }
@@ -19,24 +19,49 @@ export function goalTest(g: Goal): (i: number) => boolean {
   };
 }
 
-/** Breadth-first search on the tile grid, 8 directions, no corner cutting. Returns the tiles to walk, or null if unreachable. */
+const distBuf = new Int32Array(W * H);
+const heapN = new Int32Array(W * H * 8), heapD = new Int32Array(W * H * 8);
+
+/**
+ * Shortest-time path on the tile grid (8 directions, no corner cutting). Road tiles cost half, so workers use roads
+ * when they're faster. Returns the tiles to walk, or null if unreachable.
+ */
 export function findPath(s: State, start: number, goal: Goal): number[] | null {
   const test = goalTest(goal);
   if (test(start)) return [];
   stamp++;
-  let h = 0, t = 0;
-  qBuf[t++] = start; seen[start] = stamp; prevBuf[start] = -1;
-  while (h < t) {
-    const c = qBuf[h++], cx = ix(c), cy = iy(c);
+  let size = 0;
+  const push = (n: number, d: number) => {
+    let i = size++;
+    while (i > 0) { const pi = (i - 1) >> 1; if (heapD[pi] <= d) break; heapN[i] = heapN[pi]; heapD[i] = heapD[pi]; i = pi; }
+    heapN[i] = n; heapD[i] = d;
+  };
+  const pop = () => {
+    const n = heapN[0], last = --size, ln = heapN[last], ld = heapD[last];
+    let i = 0;
+    for (;;) {
+      let c = 2 * i + 1; if (c >= size) break;
+      if (c + 1 < size && heapD[c + 1] < heapD[c]) c++;
+      if (heapD[c] >= ld) break;
+      heapN[i] = heapN[c]; heapD[i] = heapD[c]; i = c;
+    }
+    heapN[i] = ln; heapD[i] = ld; return n;
+  };
+  seen[start] = stamp; distBuf[start] = 0; prevBuf[start] = -1; push(start, 0);
+  while (size > 0) {
+    const d0 = heapD[0], c = pop();
+    if (d0 > distBuf[c]) continue;
+    if (c !== start && test(c)) { const p: number[] = []; let k = c; while (k !== start) { p.push(k); k = prevBuf[k]; } return p.reverse(); }
+    const cx = ix(c), cy = iy(c);
     for (const [dx, dy] of DIRS) {
       const nx = cx + dx, ny = cy + dy;
       if (!inB(nx, ny)) continue;
       const n = ny * W + nx;
-      if (seen[n] === stamp || !passable(s, n)) continue;
+      if (!passable(s, n)) continue;
       if (dx && dy && (!passable(s, cy * W + nx) || !passable(s, ny * W + cx))) continue;
-      seen[n] = stamp; prevBuf[n] = c;
-      if (test(n)) { const p: number[] = []; let k = n; while (k !== start) { p.push(k); k = prevBuf[k]; } return p.reverse(); }
-      qBuf[t++] = n;
+      const cost = s.roads[n] ? (dx && dy ? 3 : 2) : dx && dy ? 6 : 4;
+      const nd = d0 + cost;
+      if (seen[n] !== stamp || nd < distBuf[n]) { seen[n] = stamp; distBuf[n] = nd; prevBuf[n] = c; if (size < heapN.length) push(n, nd); }
     }
   }
   return null;

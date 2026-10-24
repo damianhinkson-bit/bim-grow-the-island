@@ -16,8 +16,8 @@ export const NT: Record<NodeType, { label: string; res: Res; rate: number; max: 
   spring: { label: 'Spring', res: 'water', rate: 1, max: Number.POSITIVE_INFINITY },
 };
 
-export type BType = 'tc' | 'house' | 'farm' | 'depot' | 'cistern' | 'seawall' | 'market' | 'aqua' | 'solar' | 'hq';
-export interface BDef { name: string; w: number; h: number; cost: Cost; hp: number; pop?: number; drop?: boolean; coast?: boolean; age?: number; build: number; desc: string }
+export type BType = 'tc' | 'house' | 'farm' | 'depot' | 'cistern' | 'seawall' | 'market' | 'aqua' | 'solar' | 'hq' | 'port' | 'airport';
+export interface BDef { name: string; w: number; h: number; cost: Cost; hp: number; pop?: number; drop?: boolean; coast?: boolean; age?: number; build: number; desc: string; landmark?: boolean }
 export const BT: Record<BType, BDef> = {
   tc: { name: 'Town Centre', w: 2, h: 2, cost: {}, hp: 1200, pop: 5, drop: true, build: 1, desc: 'Trains workers and takes drop-offs. Advance your age here.' },
   house: { name: 'Chattel House', w: 1, h: 1, cost: { stone: 40 }, hp: 200, pop: 5, build: 10, desc: '+5 population.' },
@@ -29,6 +29,8 @@ export const BT: Record<BType, BDef> = {
   aqua: { name: 'Aquaponics', w: 1, h: 1, age: 2, cost: { stone: 120, bbd: 80 }, hp: 300, build: 22, desc: 'Fish and greens together: +2 food/s, uses 0.5 water/s. Half speed without solar nearby.' },
   solar: { name: 'Solar Array', w: 1, h: 1, age: 2, cost: { stone: 60, bbd: 100 }, hp: 200, build: 14, desc: 'Powers aquaponics within 5 tiles.' },
   hq: { name: 'AgroCorp HQ', w: 2, h: 2, cost: {}, hp: 9999, build: 1, desc: '' },
+  port: { name: 'Bridgetown Port', w: 2, h: 2, cost: {}, hp: 9999, build: 1, landmark: true, desc: 'Ships export your surplus and bring in supplies. Fishing boats sail from here.' },
+  airport: { name: 'Grantley Adams Airport', w: 2, h: 2, cost: {}, hp: 9999, build: 1, landmark: true, desc: 'Air freight pays top prices for fresh food. Tourists bring income to whoever holds Christ Church.' },
 };
 export const BUILD_LIST: BType[] = ['house', 'farm', 'depot', 'cistern', 'seawall', 'market', 'aqua', 'solar'];
 export const AGE_COST: Cost = { food: 400, water: 150, stone: 200, bbd: 150 };
@@ -68,3 +70,31 @@ export function fmtCost(c: Cost): string {
   const e = Object.entries(c) as [Res, number][];
   return e.length ? e.map(([k, v]) => `${v} ${k === 'bbd' ? 'BBD' : k}`).join(' · ') : 'Free';
 }
+
+// ---------- roads, port and airport
+/** Coral stone per road tile. */
+export const ROAD_COST = 5;
+/** Share of each port or airport deal's BBD that goes to whoever holds that parish. */
+export const FEE = 0.1;
+export const BOAT_COST: Cost = { stone: 60, bbd: 40 };
+/** Food per second each fishing boat lands. */
+export const BOAT_RATE = 0.4;
+export const MAX_BOATS = 3;
+/** BBD per second the airport's parish holder earns from tourists while the airport is open. */
+export const TOURISM = 0.3;
+/** Food each road-linked player gets from the relief ship after a hurricane. */
+export const RELIEF = 80;
+export type Landmark = 'port' | 'airport';
+export type DealId = 'export-food' | 'export-stone' | 'import-food' | 'import-water' | 'airfreight';
+export interface Deal { label: string; give: Cost; get: Cost }
+export const DEALS: Record<Landmark, Partial<Record<DealId, Deal>>> = {
+  port: {
+    'export-food': { label: 'Export 100 food', give: { food: 100 }, get: { bbd: 60 } },
+    'export-stone': { label: 'Export 100 stone', give: { stone: 100 }, get: { bbd: 50 } },
+    'import-food': { label: 'Import 100 food', give: { bbd: 80 }, get: { food: 100 } },
+    'import-water': { label: 'Import 100 water', give: { bbd: 40 }, get: { water: 100 } },
+  },
+  airport: {
+    airfreight: { label: 'Air-freight 50 fresh food', give: { food: 50 }, get: { bbd: 45 } },
+  },
+};

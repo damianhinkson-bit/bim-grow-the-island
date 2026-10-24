@@ -3,6 +3,8 @@ import type { BType, Difficulty, NodeType, Res } from './defs';
 /** Static map: identical for every game, derived from the real parish borders. */
 export interface MapData {
   land: Uint8Array; coast: Uint8Array; pid: Int8Array; depth: Uint8Array; urban: Uint8Array; elev: Float32Array; scot: Float32Array;
+  /** 1 where a real highway runs. */
+  highway: Uint8Array;
 }
 
 /** pid: the parish the resource belongs to (for fish, the parish of the nearest shore). */
@@ -28,6 +30,8 @@ export interface Player {
   res: Record<Res, number>; age: number; ageT: number; stats: { food: number };
   /** True when the stockpile can't feed the workers: they then work at half speed. */
   hungry: boolean;
+  /** Fishing boats based at the port. */
+  boats: number;
   /** Running totals since the game began, so the dashboard can show rates per minute. */
   flow: Flow;
 }
@@ -48,6 +52,10 @@ export interface State {
   parishes: Parish[];
   nodes: Node[];
   nodeAt: Int32Array; bAt: Int32Array;
+  /** 0 no road, 1 highway, 2 road a player built. Anyone can walk any road. */
+  roads: Uint8Array;
+  /** Bumps when roads change, so renderers redraw them. */
+  roadVersion: number;
   buildings: Record<number, Building>;
   workers: Record<number, Worker>;
   players: Player[];

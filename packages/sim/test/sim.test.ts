@@ -106,3 +106,54 @@ describe('AgroCorp and money', () => {
     expect(applyCommand(s, 'p1', { type: 'market', trade: 'sell-food' }).ok).toBe(false);
   });
 });
+
+describe('roads, port and airport', () => {
+  it('lays road tiles in your own parishes for 5 stone each', () => {
+    const s = createGame({ players: [{ name: 'A' }] });
+    const tiles = s.parishes[P.MICHAEL].tiles.filter((i) => !s.roads[i] && s.nodeAt[i] < 0 && s.bAt[i] < 0).slice(0, 3);
+    const r = applyCommand(s, 'p1', { type: 'road', tiles });
+    expect(r.ok).toBe(true);
+    expect(tiles.every((i) => s.roads[i] === 2)).toBe(true);
+    expect(s.players[0].res.stone).toBe(120 - 15);
+    const away = s.parishes[P.PHILIP].tiles.find((i) => !s.roads[i])!;
+    expect(applyCommand(s, 'p1', { type: 'road', tiles: [away] }).ok).toBe(false);
+  });
+  it('makes workers walk faster on roads', () => {
+    const run = (onRoad: boolean) => {
+      const s = createGame({ players: [{ name: 'A' }] });
+      const w = workersOf(s, 'p1')[0];
+      const row = Array.from({ length: 10 }, (_, k) => 30 * W + 20 + k);
+      for (const i of row) { s.nodeAt[i] = -1; s.bAt[i] = -1; s.roads[i] = onRoad ? 2 : 0; }
+      for (const i of row) s.map.land[i] = 1;
+      w.x = 20.5; w.y = 30.5;
+      applyCommand(s, 'p1', { type: 'move', workers: [w.id], tile: row[9] });
+      let t = 0; while (w.task && t < 200) { step(s); t++; }
+      return t;
+    };
+    const slow = run(false), fast = run(true);
+    expect(fast).toBeLessThan(slow * 0.65);
+  });
+  it('trades at the port with a 10% fee to the parish holder', () => {
+    const s = createGame({ players: [{ name: 'A' }, { name: 'B' }] });
+    // p1 holds St. Michael (the port's parish) and starts on a highway; p2 starts unconnected
+    expect(applyCommand(s, 'p2', { type: 'trade', at: 'port', deal: 'export-food' }).ok).toBe(false);
+    expect(applyCommand(s, 'p1', { type: 'trade', at: 'port', deal: 'export-food' }).ok).toBe(true);
+    expect(s.players[0].res).toMatchObject({ food: 100, bbd: 160 });
+    // hand St. Michael to p2: now p1 pays p2 the 10% fee on the same deal
+    s.parishes[P.MICHAEL].owner = 'p2';
+    expect(applyCommand(s, 'p1', { type: 'trade', at: 'port', deal: 'export-food' }).ok).toBe(true);
+    expect(s.players[0].res.bbd).toBe(160 + 54);
+    expect(s.players[1].res.bbd).toBe(100 + 6);
+  });
+  it('launches fishing boats that land food, and closes the airport for hurricanes', () => {
+    const s = createGame({ players: [{ name: 'A' }] });
+    s.players[0].res.bbd = 500; s.players[0].res.stone = 500;
+    expect(applyCommand(s, 'p1', { type: 'boat' }).ok).toBe(true);
+    expect(s.players[0].boats).toBe(1);
+    const f0 = s.players[0].flow.gain.food;
+    for (let t = 0; t < 100; t++) step(s);
+    expect(s.players[0].flow.gain.food - f0).toBeGreaterThan(3);
+    s.weather.stormT = 3;
+    expect(applyCommand(s, 'p1', { type: 'trade', at: 'airport', deal: 'airfreight' }).ok).toBe(false);
+  });
+});
