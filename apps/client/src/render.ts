@@ -24,6 +24,8 @@ export class Renderer {
   cam = { x: 0, y: 0 };
   z = 1;
   private TS = 2;
+  /** Ownership colours are soft fills and lines, so a lower resolution is fine and saves memory. */
+  private ownTS = 1;
   private terrain!: Sprite;
   private own!: Sprite;
   private below = new Graphics();
@@ -45,16 +47,32 @@ export class Renderer {
   private ownVer = -1;
   private time = 0;
 
+  /** Called if the phone's graphics memory gives out, so the game can say so instead of showing a black screen. */
+  onContextLost?: () => void;
+  private maxTexture(): number {
+    try {
+      const gl = (this.app.renderer as unknown as { gl?: WebGLRenderingContext }).gl;
+      return gl ? Math.min(4096, gl.getParameter(gl.MAX_TEXTURE_SIZE) as number) : 2048;
+    } catch { return 2048; }
+  }
   get vw() { return this.app.screen.width; }
   get vh() { return this.app.screen.height; }
 
   async init(game: GameSession, mount: HTMLElement) {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    await this.app.init({ resizeTo: window, background: '#0A3478', antialias: true, resolution: dpr, autoDensity: true });
+    // keep GPU memory modest: phones crash and reload the page when a tab uses too much
+    await this.app.init({ resizeTo: window, background: '#0A3478', antialias: false, resolution: dpr, autoDensity: true, powerPreference: 'low-power' });
+    this.app.canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); this.onContextLost?.(); });
     this.app.canvas.id = 'game';
     this.app.canvas.setAttribute('aria-label', 'Map of Barbados');
     mount.prepend(this.app.canvas);
-    this.TS = dpr >= 1.5 ? 2 : 1.25;
+    // The island map is painted once into a big image. Cap its longest side so it fits every phone's memory and
+    // texture limits: 2048 px normally, 1536 px on phones that report 4 GB of RAM or less.
+    const mem = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 8;
+    const maxGpu = this.maxTexture();
+    const maxSide = Math.min(maxGpu, mem <= 4 ? 1536 : 2048);
+    this.TS = Math.min(dpr >= 1.5 ? 2 : 1.25, maxSide / (Math.max(W, H) * T));
+    this.ownTS = Math.min(1, this.TS);
     this.app.stage.addChild(this.world, this.overlay);
     this.bldL.sortableChildren = true; this.wrkL.sortableChildren = true;
     this.world.addChild(this.roadG, this.below, this.nodesL, this.bldL, this.wrkL, this.above);
@@ -68,7 +86,7 @@ export class Renderer {
     this.terrain?.destroy(); this.own?.destroy();
     this.parishLabels.forEach((t) => t.destroy()); this.townLabels.forEach((t) => t.destroy()); this.agroLabel?.destroy();
     this.terrainCanvas = bakeTerrain(s, this.TS);
-    this.ownCanvas = bakeOwnership(s, this.TS);
+    this.ownCanvas = bakeOwnership(s, this.ownTS);
     this.terrain = new Sprite(Texture.from(this.terrainCanvas)); this.terrain.width = W * T; this.terrain.height = H * T;
     this.own = new Sprite(Texture.from(this.ownCanvas)); this.own.width = W * T; this.own.height = H * T;
     this.world.addChildAt(this.terrain, 0); this.world.addChildAt(this.own, 1);
@@ -106,7 +124,7 @@ export class Renderer {
     this.world.scale.set(this.z);
     this.world.position.set(-this.cam.x * this.z + sx, -this.cam.y * this.z + sy);
     if (s.parishVersion !== this.ownVer) {
-      bakeOwnership(s, this.TS, this.ownCanvas); this.own.texture.source.update(); this.ownVer = s.parishVersion;
+      bakeOwnership(s, this.ownTS, this.ownCanvas); this.own.texture.source.update(); this.ownVer = s.parishVersion;
     }
     const rv = `${s.roadVersion}:${s.players.map((p) => p.age).join('')}`;
     if (rv !== this.roadVer) { this.drawRoads(s); this.roadVer = rv; }

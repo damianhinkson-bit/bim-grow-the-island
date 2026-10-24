@@ -10,7 +10,18 @@ async function boot() {
   let game: GameSession = new LocalGame({ players: 1 });
   let net: NetworkGame | null = null;
   const r = new Renderer();
-  await r.init(game, document.getElementById('app')!);
+  r.onContextLost = () => {
+    const o = document.getElementById('overlay')!, c = document.getElementById('card')!;
+    c.innerHTML = '<h1 style="font-size:28px">Your phone needs a moment</h1><p class="sub">The browser ran short of graphics memory. Close other tabs or apps, then reload. Online games pick up where you left off.</p><button class="btn primary" onclick="location.reload()">Reload</button>';
+    o.hidden = false;
+  };
+  try {
+    await r.init(game, document.getElementById('app')!);
+  } catch (e) {
+    document.getElementById('card')!.innerHTML = '<h1 style="font-size:28px">This browser can\'t run the game</h1><p class="sub">The game needs WebGL graphics. Try the latest Chrome, Safari or Samsung Internet, and make sure hardware acceleration is on.</p>';
+    console.error(e);
+    return;
+  }
   const centerHome = () => {
     const me = game.state.players.find((p) => p.id === game.me) ?? game.state.players[0];
     const home = game.state.parishes[me.home];
