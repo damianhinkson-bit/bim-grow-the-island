@@ -241,13 +241,39 @@ export class UI {
     const note = at === 'port' ? `After each hurricane a relief ship brings ${RELIEF} food to every co-op connected here.` : closed ? '<strong>Closed for the hurricane.</strong>' : `Tourists pay ${Math.round(TOURISM * 60)} BBD a minute to whoever holds Christ Church while it's open.`;
     return `<h3>${d.name}</h3><p>Connected by road. ${holderTxt} ${note}</p><div class="grid2">${deals}${extra}</div><div class="btns" style="margin-top:6px">${this.btn('deselect', 'Close')}</div>`;
   }
+  /** True while a finger is down on the panel: automatic refreshes wait so the list doesn't jump or swap under it. */
+  private panelHeld = false;
   renderPanel(force = false) {
+    if (this.panelHeld && !force) return;
     const h = this.panelHTML();
-    if (force || h !== this.lastPanel) { if (h !== this.lastPanel) { this.panel.innerHTML = h; this.lastPanel = h; } }
+    if (h === this.lastPanel) return;
+    const sameView = h.slice(0, 40) === this.lastPanel.slice(0, 40), top = this.panel.scrollTop;
+    this.panel.innerHTML = h; this.lastPanel = h;
+    this.panel.classList.toggle('tall', this.menu === 'build');
+    if (sameView) this.panel.scrollTop = top;
   }
   private bindPanel() {
-    // act on pointerdown so a panel refresh between press and release can't swallow the tap
-    this.panel.addEventListener('pointerdown', (e) => { const b = (e.target as HTMLElement).closest('button'); if (!b || b.disabled) return; e.preventDefault(); this.act(b.dataset.act!); });
+    // A button fires when the finger lifts without having scrolled, like a normal phone app.
+    // While a finger is down the panel isn't refreshed, so the button can't be swapped out mid-tap.
+    let press: { act: string; x: number; y: number; el: HTMLElement } | null = null;
+    const cancel = () => { press?.el.classList.remove('pressed'); press = null; this.panelHeld = false; };
+    this.panel.addEventListener('pointerdown', (e) => {
+      this.panelHeld = true;
+      const b = (e.target as HTMLElement).closest('button');
+      if (!b || b.disabled) { press = null; return; }
+      press = { act: b.dataset.act!, x: e.clientX, y: e.clientY, el: b }; b.classList.add('pressed');
+    });
+    this.panel.addEventListener('pointermove', (e) => { if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 10) { press.el.classList.remove('pressed'); press = null; } });
+    this.panel.addEventListener('scroll', () => { if (press) { press.el.classList.remove('pressed'); press = null; } }, { passive: true });
+    this.panel.addEventListener('pointerup', (e) => {
+      const p = press; cancel();
+      if (!p) return;
+      const under = document.elementFromPoint(e.clientX, e.clientY)?.closest('button');
+      if (under === p.el || !under) this.act(p.act);
+    });
+    this.panel.addEventListener('pointercancel', cancel);
+    this.panel.addEventListener('pointerleave', () => { if (!press) this.panelHeld = false; });
+    // keyboard (Enter/Space) arrives as a click with no pointer
     this.panel.addEventListener('click', (e) => { if (e.detail !== 0) return; const b = (e.target as HTMLElement).closest('button'); if (b && !b.disabled) this.act(b.dataset.act!); });
   }
   private bindBar() {
