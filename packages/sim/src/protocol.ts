@@ -10,7 +10,12 @@ import type { Mode } from './types';
 export const PROTOCOL = 1;
 export const CODE_LEN = 5;
 
-export interface LobbyPlayer { slot: number; name: string; color: string; connected: boolean }
+/** ai: the caretaker is running this player's co-op while they're away. */
+export interface LobbyPlayer { slot: number; name: string; color: string; connected: boolean; ai: boolean }
+/** Seconds a player can be away before the caretaker takes over their co-op. */
+export const AI_AFTER_S = 120;
+/** The caretaker acts every this many ticks (2 s). */
+export const AI_EVERY = 20;
 export interface LobbyInfo { code: string; host: number; players: LobbyPlayer[]; mode: Mode; difficulty: Difficulty; started: boolean }
 
 export type ClientMsg =

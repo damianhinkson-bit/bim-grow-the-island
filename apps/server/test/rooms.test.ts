@@ -113,3 +113,27 @@ describe('rooms', () => {
     expect(ph.last('error')?.msg).toContain('out of date');
   });
 });
+
+describe('caretaker', () => {
+  it('takes over an away player after 2 minutes, in lockstep, and hands back on return', () => {
+    const { lobby, phones, room, code, start } = setup(2);
+    start();
+    run(lobby, 2);
+    const token = phones[1].last('joined')!.token;
+    lobby.drop(phones[1]);
+    run(lobby, 100);
+    expect(room.slots[1].ai).toBe(false);
+    run(lobby, 30);
+    expect(room.slots[1].ai).toBe(true);
+    expect(phones[0].last('lobby')!.lobby.players[1].ai).toBe(true);
+    run(lobby, 60);
+    const s = room.state!;
+    expect(workersOf(s, 'p2').some((w) => w.task)).toBe(true);
+    expect(stateHash(phones[0].state!)).toBe(stateHash(s));
+    const back = new Phone();
+    lobby.handle(back, { t: 'join', code, name: 'Friend 1', token, v: V });
+    expect(room.slots[1].ai).toBe(false);
+    run(lobby, 5);
+    expect(stateHash(back.state!)).toBe(stateHash(room.state!));
+  });
+});

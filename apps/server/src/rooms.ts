@@ -1,6 +1,6 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import {
-  CODE_LEN, DIFFICULTY, DT, MAX_PLAYERS, PLAYER_COLORS, PROTOCOL, applyCommand, createGame, snapshot, stateHash, step,
+  AI_AFTER_S, AI_EVERY, CODE_LEN, DIFFICULTY, DT, MAX_PLAYERS, PLAYER_COLORS, PROTOCOL, applyCommand, caretaker, createGame, snapshot, stateHash, step,
   type ClientMsg, type Command, type Difficulty, type LobbyInfo, type Mode, type ServerMsg, type State,
 } from '@bim/sim';
 
@@ -13,7 +13,7 @@ const PAUSE_LIMIT = 3, PAUSE_MAX_S = 60;
 const IDLE_ROOM_MS = 10 * 60 * 1000;
 const MAX_CMDS_PER_TICK = 25;
 
-interface Slot { name: string; token: string; conn: Conn | null; pauses: number; lastSeen: number }
+interface Slot { name: string; token: string; conn: Conn | null; pauses: number; lastSeen: number; awaySince: number; ai: boolean }
 
 export class Room {
   code: string;
@@ -39,7 +39,7 @@ export class Room {
   lobby(): LobbyInfo {
     return {
       code: this.code, host: this.host, mode: this.mode, difficulty: this.difficulty, started: this.started,
-      players: this.slots.map((s, k) => ({ slot: k, name: s.name, color: PLAYER_COLORS[k], connected: !!s.conn })),
+      players: this.slots.map((s, k) => ({ slot: k, name: s.name, color: PLAYER_COLORS[k], connected: !!s.conn, ai: s.ai })),
     };
   }
   broadcast(m: ServerMsg) { for (const s of this.slots) s.conn?.send(m); }
@@ -50,7 +50,7 @@ export class Room {
     const back = token ? this.slots.findIndex((s) => s.token === token) : -1;
     if (back >= 0) {
       const s = this.slots[back];
-      s.conn?.close(); s.conn = conn; s.lastSeen = Date.now(); this.emptySince = 0;
+      s.conn?.close(); s.conn = conn; s.lastSeen = Date.now(); s.ai = false; s.awaySince = 0; this.emptySince = 0;
       conn.send({ t: 'joined', code: this.code, slot: back, token: s.token });
       this.sendLobby();
       if (this.state) conn.send({ t: 'start', snap: snapshot(this.state), you: this.pid(back) });
@@ -59,7 +59,7 @@ export class Room {
     }
     if (this.started) return 'That game has already started. Ask the host for a new code.';
     if (this.slots.length >= MAX_PLAYERS) return `That game is full (${MAX_PLAYERS} players).`;
-    const slot: Slot = { name: cleanName(name, this.slots.length), token: randomBytes(12).toString('hex'), conn, pauses: 0, lastSeen: Date.now() };
+    const slot: Slot = { name: cleanName(name, this.slots.length), token: randomBytes(12).toString('hex'), conn, pauses: 0, lastSeen: Date.now(), awaySince: 0, ai: false };
     this.slots.push(slot); this.emptySince = 0;
     const k = this.slots.length - 1;
     conn.send({ t: 'joined', code: this.code, slot: k, token: slot.token });
@@ -73,7 +73,7 @@ export class Room {
       // in the lobby a player who leaves frees their seat
       this.slots.splice(k, 1);
       if (this.host === k) this.host = 0; else if (this.host > k) this.host--;
-    } else this.slots[k].conn = null;
+    } else { this.slots[k].conn = null; this.slots[k].awaySince = this.clock; }
     if (!this.slots.some((s) => s.conn)) this.emptySince = Date.now();
     this.sendLobby();
   }
@@ -130,8 +130,15 @@ export class Room {
   }
 
   /** Called often by the server loop. Runs as many 0.1 s ticks as real time calls for (at most 5 at once). */
+  /** The time as the room's update loop last saw it (lets tests drive a fake clock). */
+  private clock = Date.now();
   update(now: number) {
+    this.clock = now;
     if (!this.state || this.state.ended) return;
+    // hand away players' co-ops to the caretaker after a while
+    let changed = false;
+    for (const sl of this.slots) if (!sl.conn && !sl.ai && sl.awaySince && now - sl.awaySince > AI_AFTER_S * 1000) { sl.ai = true; changed = true; }
+    if (changed) this.sendLobby();
     if (this.paused) { if (now - this.pausedAt > PAUSE_MAX_S * 1000) this.setPaused(false, 'the timer'); return; }
     this.acc += now - this.last; this.last = now;
     let n = 0;
@@ -140,6 +147,8 @@ export class Room {
   }
   private tick() {
     const s = this.state!, cmds = this.pending; this.pending = []; this.perTick.clear();
+    // the caretaker's moves go out with everyone else's, so every phone applies exactly the same commands
+    if ((s.tick + 1) % AI_EVERY === 0) this.slots.forEach((sl, k) => { if (sl.ai) for (const c of caretaker(s, this.pid(k))) cmds.push([this.pid(k), c]); });
     for (const [pid, c] of cmds) { try { applyCommand(s, pid, c); } catch { /* a malformed command changes nothing */ } }
     step(s);
     this.broadcast({ t: 'tick', n: s.tick, cmds });

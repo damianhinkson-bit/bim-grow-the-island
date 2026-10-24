@@ -218,3 +218,17 @@ describe('online play support', () => {
     expect(applyCommand(v, 'p1', { type: 'gift', to: 'p2', give: { water: 40 } }).ok).toBe(false);
   });
 });
+
+describe('caretaker', () => {
+  it('keeps an abandoned co-op working: workers gather, the stockpile grows', async () => {
+    const { caretaker } = await import('../src');
+    const s = createGame({ seed: 5, players: [{ name: 'A' }] });
+    const me = s.players[0];
+    for (let t = 0; t < 3000; t++) { if (t % 20 === 0) for (const c of caretaker(s, 'p1')) applyCommand(s, 'p1', c); step(s); }
+    expect(workersOf(s, 'p1').filter((w) => !w.task).length).toBeLessThanOrEqual(1);
+    expect(me.flow.gain.food).toBeGreaterThan(300);
+    expect(me.flow.gain.stone).toBeGreaterThan(50);
+    expect(workersOf(s, 'p1').length).toBeGreaterThan(4);
+    expect(me.age).toBe(1); // big decisions stay with the player
+  });
+});

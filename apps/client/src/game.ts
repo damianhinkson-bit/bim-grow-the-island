@@ -18,6 +18,8 @@ export interface GameSession {
   readonly online?: boolean;
   /** Online only: whether another player is connected right now. */
   connected?(pid: string): boolean;
+  /** Online only: whether the computer is looking after a player's co-op. */
+  caretaken?(pid: string): boolean;
 }
 
 export class LocalGame implements GameSession {

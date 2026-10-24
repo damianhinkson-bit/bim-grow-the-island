@@ -30,7 +30,7 @@ export class FlowTracker {
 }
 
 /** The dashboard's HTML for the local player. Buttons carry data-act values the UI handles. */
-export function dashboardHTML(s: State, me: string, tr: FlowTracker, isOn: (pid: string) => boolean = () => true): string {
+export function dashboardHTML(s: State, me: string, tr: FlowTracker, isOn: (pid: string) => boolean = () => true, isAi: (pid: string) => boolean = () => false): string {
   const p = player(s, me)!, ws = workersOf(s, me), cap = popCap(s, me), r = tr.rates();
   const eatPerMin = EAT * 60 * ws.length;
   // ---------- food
@@ -138,7 +138,7 @@ export function dashboardHTML(s: State, me: string, tr: FlowTracker, isOn: (pid:
   const offerTxt = (o: typeof s.offers[number]) => `${fmtCost(o.give) || 'nothing'} for ${fmtCost(o.get) || 'nothing'}`;
   const playersCard = others.length ? `<section class="dcard"><h4>Players ${incoming.length ? `<span class="pill warn">${incoming.length} offer${incoming.length > 1 ? 's' : ''}</span>` : ''}</h4>
     ${incoming.map((o) => { const f = player(s, o.from); return `<div class="offer"><p><strong style="color:${f?.color}">${f?.name}</strong> offers ${offerTxt(o)}. <span class="muted">${Math.max(0, Math.ceil(60 - (s.time - o.t)))}s left</span></p><div class="btns"><button class="btn primary" data-act="answer:${o.id}:1">Accept</button><button class="btn" data-act="answer:${o.id}:0">Decline</button></div></div>`; }).join('')}
-    <ul class="plist">${others.map((q) => `<li><span><span class="sw" style="background:${q.color}"></span>${q.name}</span><span class="muted">${isOn(q.id) ? '' : '<span class="pill warn">Away</span> '}${AGES[q.age - 1].short} · ${owned(s, q.id)} parish${owned(s, q.id) === 1 ? '' : 'es'}</span></li>
+    <ul class="plist">${others.map((q) => `<li><span><span class="sw" style="background:${q.color}"></span>${q.name}</span><span class="muted">${isOn(q.id) ? '' : `<span class="pill warn">${isAi(q.id) ? 'Away · computer playing' : 'Away'}</span> `}${AGES[q.age - 1].short} · ${owned(s, q.id)} parish${owned(s, q.id) === 1 ? '' : 'es'}</span></li>
       <li class="pbtns"><button class="btn" data-act="offer:${q.id}">Offer trade</button>${q.team === p.team ? `<button class="btn" data-act="gift:${q.id}">Send gift</button>` : ''}</li>`).join('')}</ul>
     ${outgoing.length ? `<p class="hint">Waiting on: ${outgoing.map((o) => `${player(s, o.to)?.name} (${offerTxt(o)})`).join('; ')}</p>` : ''}
   </section>` : '';

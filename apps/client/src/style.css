@@ -154,3 +154,5 @@ body{background:var(--sea);color:var(--fg);font-family:var(--body);-webkit-user-
 .pdot{width:11px;height:11px;border-radius:50%;border:1.5px solid rgba(255,255,255,.7);position:relative}
 .pdot.off{opacity:.35}
 .pdot.off::after{content:"";position:absolute;left:-2px;right:-2px;top:50%;height:1.5px;background:#fff;transform:rotate(-40deg)}
+.pdot.ai{width:auto;min-width:11px;height:13px;border-radius:7px;padding:0 3px;font-size:8px;font-weight:800;line-height:11px;color:#071330;opacity:.8}
+.pdot.ai::after{display:none}

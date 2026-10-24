@@ -412,7 +412,7 @@ export class UI {
     // online: one dot per player, faded and struck through while they're away
     const pl = $('#s-players');
     if (this.game.online) {
-      const html = s.players.map((p) => { const on = this.game.connected?.(p.id) ?? true; return `<span class="pdot${on ? '' : ' off'}" style="background:${p.color}" title="${p.name}${on ? '' : ' (away)'}"></span>`; }).join('');
+      const html = s.players.map((p) => { const on = this.game.connected?.(p.id) ?? true, ai = this.game.caretaken?.(p.id) ?? false; return `<span class="pdot${on ? '' : ' off'}${ai ? ' ai' : ''}" style="background:${p.color}" title="${p.name}${on ? '' : ai ? ' (away, computer playing)' : ' (away)'}">${ai ? 'AI' : ''}</span>`; }).join('');
       if (this.hudCache['s-players'] !== html) { this.hudCache['s-players'] = html; pl.innerHTML = html; pl.setAttribute('aria-label', 'Players: ' + s.players.map((p) => `${p.name}${(this.game.connected?.(p.id) ?? true) ? '' : ' away'}`).join(', ')); }
       pl.hidden = false;
     } else pl.hidden = true;
@@ -468,7 +468,7 @@ export class UI {
   private renderDash(force = false) {
     // don't swap the buttons out from under a finger that's pressing one
     if (!force && $('#dash-body').matches(':active, :has(:active)')) return;
-    const h = dashboardHTML(this.s, this.game.me, this.flows, (pid) => this.game.connected?.(pid) ?? true);
+    const h = dashboardHTML(this.s, this.game.me, this.flows, (pid) => this.game.connected?.(pid) ?? true, (pid) => this.game.caretaken?.(pid) ?? false);
     if (force || h !== this.lastDash) { $('#dash-body').innerHTML = h; this.lastDash = h; }
   }
   /** Sends each idle worker to the nearest breadfruit tree or fishing spot. */

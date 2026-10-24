@@ -25,6 +25,7 @@ export interface NetHandlers {
   result(r: CmdResult): void;
   paused(p: boolean, by: string): void;
   presence(name: string, connected: boolean): void;
+  caretaker(name: string): void;
 }
 
 /**
@@ -55,6 +56,11 @@ export class NetworkGame implements GameSession {
   connected(pid: string): boolean {
     const slot = Number(pid.slice(1)) - 1;
     return this.lobbyInfo?.players.find((p) => p.slot === slot)?.connected ?? true;
+  }
+  /** Whether the caretaker is running a player's co-op. */
+  caretaken(pid: string): boolean {
+    const slot = Number(pid.slice(1)) - 1;
+    return this.lobbyInfo?.players.find((p) => p.slot === slot)?.ai ?? false;
   }
   get alpha() { return Math.min(1, this.acc / DT); }
   get paused() { return this.serverPaused; }
@@ -143,7 +149,9 @@ export class NetworkGame implements GameSession {
         this.lobbyInfo = m.lobby;
         if (this.state && before) for (const p of m.lobby.players) {
           const was = before.players.find((q) => q.slot === p.slot);
-          if (was && was.connected !== p.connected && p.slot !== this.slot) this.h.presence(p.name, p.connected);
+          if (!was || p.slot === this.slot) continue;
+          if (was.connected !== p.connected) this.h.presence(p.name, p.connected);
+          if (!was.ai && p.ai) this.h.caretaker(p.name);
         }
         this.h.lobby(m.lobby, this.slot);
         break;
