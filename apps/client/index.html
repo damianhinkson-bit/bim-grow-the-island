@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Bim: Grow the Island</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800&family=Lilita+One&display=swap">
+</head>
+<body>
+<div id="app"></div>
+<div id="hud">
+  <div class="row">
+    <span class="chip"><span class="dot d-food"></span><b id="r-food">0</b></span>
+    <span class="chip"><span class="dot d-water"></span><b id="r-water">0</b></span>
+    <span class="chip"><span class="dot d-stone"></span><b id="r-stone">0</b></span>
+    <span class="chip"><span class="dot d-bbd"></span><b id="r-bbd">0</b>&nbsp;BBD</span>
+    <span class="chip"><span class="dot d-pop"></span><b id="r-pop">0</b></span>
+  </div>
+  <div class="row">
+    <span class="chip" id="s-age">Village Age</span>
+    <span class="chip" id="s-hurr">Hurricane 5:00</span>
+    <span class="chip dry" id="s-dry" hidden>Drought</span>
+    <span class="chip"><span id="s-par">You 1/6</span><span class="rivalbar" title="AgroCorp's next buyout"><i id="s-rival"></i></span></span>
+  </div>
+  <canvas id="mini" aria-label="Minimap"></canvas>
+</div>
+
+<div id="dock">
+  <div id="toasts" aria-live="polite"></div>
+  <div id="panel"></div>
+  <div id="bar">
+    <button class="btn" id="b-build">Build</button>
+    <button class="btn" id="b-idle">Idle</button>
+    <button class="btn" id="b-all">All workers</button>
+    <button class="btn" id="b-pause">Pause</button>
+  </div>
+</div>
+
+<div id="overlay">
+  <div class="card" id="card">
+    <div class="flag"><i></i><i></i><i></i></div>
+    <div class="kicker">Damian Grows presents</div>
+    <h1>Bim: Grow the Island</h1>
+    <p class="sub">Grow food for Barbados. Feed <strong>6 of the 11 parishes</strong> and reach the <strong>Co-op Age</strong> before AgroCorp buys up the island.</p>
+    <ul>
+      <li><strong>Tap a worker</strong>, then tap breadfruit, coral stone, a spring or flying fish to gather.</li>
+      <li><strong>Build</strong> chattel houses, farm plots, cisterns and seawalls in your parishes.</li>
+      <li><strong>Tap a parish</strong> next to yours to feed it and win it over.</li>
+      <li>Hurricanes hit every few minutes. <strong>Seawalls</strong> shield nearby buildings.</li>
+      <li>Drag to pan. Pinch or scroll to zoom.</li>
+    </ul>
+    <button class="btn primary" id="start">Start growing</button>
+    <p class="credit">Parish borders: geoBoundaries / Wikimedia Commons, CC BY 2.5.</p>
+  </div>
+</div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

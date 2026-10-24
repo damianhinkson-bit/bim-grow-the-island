@@ -7,13 +7,27 @@ before AgroCorp buys them up. Play solo, or online with up to 4 players in co-op
 ## Where things are
 
 - `docs/design-doc.md` — the game design: rules, crops, aquaponics, ages, multiplayer, build plan
-- `prototype/index.html` — the single-file playable prototype (open it in any browser)
+- `packages/sim` — the game rules as a pure simulation: fixed 0.1 s steps, seeded randomness,
+  every player action a validated command. Runs the same in the browser and on a server.
+- `apps/client` — the phone/browser game: PixiJS rendering, touch controls, HUD
+- `prototype/index.html` — the original single-file prototype
+
+## Running it
+
+```
+npm install
+npm run dev        # play locally at the address Vite prints (also reachable from your phone on the same Wi-Fi)
+npm test           # simulation tests, including the determinism check
+npm run build      # production build into apps/client/dist
+npm run build:single -w @bim/client   # one self-contained HTML file in apps/client/dist-single
+```
 
 ## Status
 
-Build step 1 (real map) is done in the prototype.
-Next: step 2, the foundation — split the game logic from the drawing so the same game
-runs on a phone or on a multiplayer server.
+- Step 1, real map: done.
+- Step 2, foundation: done. The game plays as the prototype did, on the new engine, with
+  separate stockpiles per player and support for up to 4 players in the simulation.
+- Next: step 3, the multiplayer prototype (Colyseus server, invite codes, trading).
 
 ## Credits
 

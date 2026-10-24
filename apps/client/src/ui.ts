@@ -1,0 +1,310 @@
+import {
+  AGE_COST, AGE_T, AGRO, AGRO_HOME, BT, BUILD_LIST, NT, TRAIN, W, aquaPowered, canAfford, claimBlock, claimCost, drought, fmtCost, owned,
+  parishBuilt, player, popCap, protectedB, rivalCost, tcOf, teamOwned, winTarget, workersOf,
+  type BType, type Command, type State, type Worker,
+} from '@bim/sim';
+import type { GameSession } from './game';
+import type { Renderer, View } from './render';
+import { T } from './terrain';
+
+const $ = <E extends HTMLElement = HTMLElement>(s: string) => document.querySelector(s) as E;
+const fmtT = (sec: number) => { const s = Math.max(0, Math.ceil(sec)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+export class UI {
+  view: View = { sel: null, buildMode: null, marks: [] };
+  private menu: 'build' | null = null;
+  private lastPanel = '';
+  private panelT = 0;
+  private miniT = 0;
+  private idleIdx = 0;
+  private hudCache: Record<string, string> = {};
+  private panel = $('#panel');
+  private mini = $<HTMLCanvasElement>('#mini');
+  running = false;
+
+  constructor(private game: GameSession, private r: Renderer, private onRestart: () => void) {
+    this.bindPanel(); this.bindBar(); this.bindInput(); this.bindKeys();
+  }
+  setGame(game: GameSession) { this.game = game; this.view = { sel: null, buildMode: null, marks: [] }; this.menu = null; this.lastPanel = ''; this.hudCache = {}; }
+
+  private get s(): State { return this.game.state; }
+  private get me() { return player(this.s, this.game.me)!; }
+
+  // ---------- commands
+  private send(c: Command) {
+    const res = this.game.send(c);
+    if (!res.ok && res.msg) this.toast(res.msg);
+    else if (res.msg) this.toast(res.msg);
+    return res;
+  }
+  private selectedWorkers(): Worker[] {
+    const sel = this.view.sel; if (sel?.kind !== 'workers') return [];
+    return [...sel.ids].map((id) => this.s.workers[id]).filter((w): w is Worker => !!w && w.owner === this.game.me);
+  }
+  private mark(x: number, y: number) { this.view.marks.push({ x, y, t: 0.7 }); }
+
+  tick(dt: number) {
+    for (const m of this.view.marks) m.t -= dt;
+    this.view.marks = this.view.marks.filter((m) => m.t > 0);
+    for (const e of this.game.newEvents()) this.toast(e.msg, e.kind === 'info' ? undefined : e.kind);
+    this.hud();
+    this.panelT -= dt; if (this.panelT <= 0) { this.panelT = 0.25; this.renderPanel(); }
+    this.miniT -= dt; if (this.miniT <= 0) { this.miniT = 0.3; this.drawMini(); }
+    if (this.s.ended && this.running) this.end();
+  }
+
+  // ---------- tap handling
+  tap(sx: number, sy: number) {
+    const s = this.s, r = this.r;
+    const wx = sx / r.z + r.cam.x, wy = sy / r.z + r.cam.y, tx = Math.floor(wx / T), ty = Math.floor(wy / T);
+    if (this.view.buildMode) {
+      const type = this.view.buildMode;
+      const res = this.send({ type: 'place', building: type, x: tx, y: ty, workers: this.selectedWorkers().map((w) => w.id) });
+      if (res.ok) {
+        this.mark(tx + 0.5, ty + 0.5); this.view.buildMode = null;
+        const builders = Object.values(s.workers).filter((w) => w.task?.k === 'build' && w.task.b === res.building);
+        this.view.sel = builders.length ? { kind: 'workers', ids: new Set(builders.map((w) => w.id)) } : { kind: 'building', id: res.building! };
+      }
+      this.renderPanel(true); return;
+    }
+    this.menu = null;
+    // workers first: generous hit radius for fingers
+    const rad = Math.max(0.55, 16 / (r.z * T)); let hit: Worker | null = null, hd = rad;
+    for (const w of Object.values(s.workers)) {
+      if (w.owner !== this.game.me) continue;
+      const p = r.workerPos(w.id) ?? w, d = Math.hypot(p.x - wx / T, p.y - wy / T);
+      if (d < hd) { hd = d; hit = w; }
+    }
+    if (hit) { this.view.sel = { kind: 'workers', ids: new Set([hit.id]) }; this.renderPanel(true); return; }
+    if (tx < 0 || ty < 0 || tx >= W || ty >= s.map.land.length / W) { this.view.sel = null; this.renderPanel(true); return; }
+    const i = ty * W + tx, bid = s.bAt[i], b = bid >= 0 ? s.buildings[bid] : undefined, nid = s.nodeAt[i], n = nid >= 0 ? s.nodes[nid] : undefined;
+    const ws = this.selectedWorkers();
+    if (ws.length) {
+      const ids = ws.map((w) => w.id);
+      if (n) { this.send({ type: 'gather', workers: ids, node: n.id }); this.mark(tx + 0.5, ty + 0.5); this.renderPanel(true); return; }
+      if (b && b.owner === this.game.me && (!b.done || b.type === 'farm')) { this.send({ type: 'work', workers: ids, building: b.id }); this.mark(b.x + b.w / 2, b.y + b.h / 2); this.renderPanel(true); return; }
+      if (b) { this.view.sel = b.type === 'hq' ? { kind: 'parish', id: AGRO_HOME } : { kind: 'building', id: b.id }; this.renderPanel(true); return; }
+      if (s.map.land[i]) { this.send({ type: 'move', workers: ids, tile: i }); this.mark(tx + 0.5, ty + 0.5); }
+      this.renderPanel(true); return;
+    }
+    if (b) this.view.sel = b.type === 'hq' ? { kind: 'parish', id: AGRO_HOME } : { kind: 'building', id: b.id };
+    else if (n) this.view.sel = { kind: 'node', id: n.id };
+    else if (s.map.land[i]) this.view.sel = { kind: 'parish', id: s.map.pid[i] };
+    else this.view.sel = null;
+    this.renderPanel(true);
+  }
+
+  private act(a: string) {
+    const s = this.s, tc = tcOf(s, this.game.me), sel = this.view.sel;
+    if (a === 'build') { this.menu = this.menu === 'build' ? null : 'build'; this.view.buildMode = null; }
+    else if (a.startsWith('place:')) { this.view.buildMode = a.slice(6) as BType; this.menu = null; }
+    else if (a === 'cancel') { this.view.buildMode = null; this.menu = null; }
+    else if (a === 'deselect') { this.view.sel = null; this.menu = null; this.view.buildMode = null; }
+    else if (a === 'train' && tc) this.send({ type: 'train', building: tc.id });
+    else if (a === 'age') this.send({ type: 'age' });
+    else if (a === 'sell-food' || a === 'sell-stone' || a === 'buy-water') this.send({ type: 'market', trade: a });
+    else if (a === 'repair' && sel?.kind === 'building') this.send({ type: 'repair', building: sel.id });
+    else if (a === 'claim' && sel?.kind === 'parish') this.send({ type: 'claim', parish: sel.id });
+    this.renderPanel(true);
+  }
+
+  // ---------- panel
+  private btn(a: string, label: string, sub?: string, o: { primary?: boolean; disabled?: boolean } = {}) {
+    return `<button class="btn${o.primary ? ' primary' : ''}" data-act="${a}"${o.disabled ? ' disabled' : ''}>${label}${sub ? `<small>${sub}</small>` : ''}</button>`;
+  }
+  private wStatus(w: Worker) {
+    const t = w.task; let st = 'Idle';
+    if (t) {
+      if (t.k === 'move') st = 'Walking';
+      else if (t.k === 'build') st = `Building ${BT[this.s.buildings[t.b]?.type ?? 'house'].name}`;
+      else if (t.k === 'farm') st = 'Farming';
+      else st = `Gathering ${NT[this.s.nodes[t.n].type].label.toLowerCase()}`;
+      if (w.phase === 'drop') st += ', heading to drop off';
+    }
+    if (w.amt >= 1) st += `. Carrying ${Math.floor(w.amt)} ${w.carry}`;
+    return st + '.';
+  }
+  private panelHTML(): string {
+    const s = this.s, me = this.me, sel = this.view.sel;
+    if (this.view.buildMode) {
+      const d = BT[this.view.buildMode];
+      return `<h3>Place ${d.name}</h3><p>Tap ${d.coast ? 'a coast tile' : 'an empty tile'} inside your parishes. ${d.desc}</p><div class="btns">${this.btn('cancel', 'Cancel')}</div>`;
+    }
+    if (this.menu === 'build') {
+      return `<h3>Build</h3><p>Costs come out when you place it. Selected or idle workers go build it.</p><div class="grid2">${BUILD_LIST.map((k) => {
+        const d = BT[k], locked = (d.age ?? 1) > me.age;
+        return this.btn('place:' + k, d.name, locked ? 'Co-op Age' : fmtCost(d.cost), { disabled: locked || !canAfford(me.res, d.cost) });
+      }).join('')}</div>`;
+    }
+    if (!sel) return `<h3>Grow the island</h3><p>Goal: feed <strong>${winTarget(s)} parishes</strong> and reach the <strong>Co-op Age</strong>. Tap a worker, then tap breadfruit, coral stone, a spring or fish. Tap any parish to see it.</p>`;
+    if (sel.kind === 'workers') {
+      const ws = this.selectedWorkers(); if (!ws.length) { this.view.sel = null; return this.panelHTML(); }
+      const head = ws.length === 1 ? 'Worker' : `${ws.length} workers`;
+      const body = ws.length === 1 ? this.wStatus(ws[0]) : `${ws.filter((w) => !w.task).length} idle.`;
+      return `<h3>${head}</h3><p>${body} Tap a resource to gather, a farm to work it, a foundation to build it, or land to walk there.</p><div class="btns">${this.btn('build', 'Build…')}${this.btn('deselect', 'Deselect')}</div>`;
+    }
+    if (sel.kind === 'node') {
+      const n = s.nodes[sel.id]; if (!n || n.amt <= 0) { this.view.sel = null; return this.panelHTML(); }
+      const d = NT[n.type];
+      return `<h3>${d.label}</h3><p>${d.max === Infinity ? 'Never runs dry, but slows in a drought.' : `${Math.ceil(n.amt)} ${d.res} left.`} Select a worker first, then tap here to gather ${d.res}.</p><div class="btns">${this.btn('deselect', 'Close')}</div>`;
+    }
+    if (sel.kind === 'building') {
+      const b = s.buildings[sel.id]; if (!b) { this.view.sel = null; return this.panelHTML(); }
+      const d = BT[b.type], mine = b.owner === this.game.me;
+      const ownerName = mine ? '' : ` <span class="tag t-free">${player(s, b.owner)?.name ?? 'AgroCorp'}</span>`;
+      if (!b.done) return `<h3>${d.name}${ownerName}</h3><p>Under construction: ${Math.floor(b.progress * 100)}%. Select workers and tap it to help build.</p><div class="btns">${this.btn('deselect', 'Close')}</div>`;
+      let info = d.desc, btns = '';
+      if (b.type === 'tc' && mine) {
+        info = `Trains workers. ${b.queue ? `Training ${b.queue} (next in ${Math.ceil(TRAIN - b.trainT)}s${workersOf(s, me.id).length >= popCap(s, me.id) ? ', needs a house' : ''}).` : ''}`;
+        btns += this.btn('train', 'Train worker', '50 food', { primary: true, disabled: me.res.food < 50 || b.queue >= 5 });
+        if (me.age === 1) btns += me.ageT >= 0 ? this.btn('noop', 'Advancing…', `${Math.ceil(AGE_T - me.ageT)}s left`, { disabled: true }) : this.btn('age', 'Co-op Age', fmtCost(AGE_COST), { disabled: !canAfford(me.res, AGE_COST) });
+      }
+      if (b.type === 'market' && mine) btns += this.btn('sell-food', 'Sell 100 food', '+50 BBD', { disabled: me.res.food < 100 }) + this.btn('sell-stone', 'Sell 100 stone', '+40 BBD', { disabled: me.res.stone < 100 }) + this.btn('buy-water', 'Truck in 100 water', '50 BBD', { disabled: me.res.bbd < 50 });
+      if (b.type === 'farm') info = `${b.worker !== null ? 'Being farmed.' : 'No farmer. Select a worker and tap this plot.'}${b.pest > 0 ? ` Pests: ${Math.ceil(b.pest)}s left.` : ''}${me.res.water < 1 ? ' Out of water, so growth is slow.' : ''}`;
+      if (b.type === 'aqua') info = aquaPowered(s, b) ? 'Powered by solar. +2 food/s.' : 'No solar array within 5 tiles, so it runs at half speed.';
+      if (mine && b.hp < b.maxHp) { const c = Math.ceil((b.maxHp - b.hp) * 0.25); btns += this.btn('repair', 'Repair', `${c} stone`, { disabled: me.res.stone < c }); }
+      const hp = `Condition ${Math.round((b.hp / b.maxHp) * 100)}%.${b.type !== 'seawall' && b.type !== 'tc' ? (protectedB(s, b) ? ' Shielded by a seawall.' : ' Not shielded from hurricanes.') : ''}`;
+      return `<h3>${d.name}${ownerName}</h3><p>${info} ${hp}</p><div class="btns">${btns}${this.btn('deselect', 'Close')}</div>`;
+    }
+    if (sel.kind === 'parish') {
+      const p = s.parishes[sel.id];
+      const op = p.owner && p.owner !== AGRO ? player(s, p.owner) : undefined;
+      const tag = p.owner === this.game.me ? '<span class="tag t-you">Your co-op</span>' : p.owner === AGRO ? '<span class="tag t-rival">AgroCorp</span>' : op ? `<span class="tag t-free">${op.name}</span>` : '<span class="tag t-free">Unclaimed</span>';
+      let body = '', b2 = '';
+      if (p.owner === this.game.me) {
+        body = p.id === me.home ? 'Your home parish.' : parishBuilt(s, p, me.id) ? 'Protected by your buildings.' : '<strong>No buildings yet.</strong> AgroCorp can buy it out.';
+        body += ' Pays 0.4 BBD/s in co-op dues.';
+      } else {
+        const block = claimBlock(s, me.id, p);
+        if (!block) {
+          const c = claimCost(s, me.id, p);
+          body = p.owner ? 'Locals will switch if you feed them well.' : 'Hungry and next to your land.';
+          b2 = this.btn('claim', p.owner ? 'Win it over' : 'Feed this parish', fmtCost(c), { primary: true, disabled: !canAfford(me.res, c) });
+        } else body = block;
+      }
+      return `<h3>${p.name}</h3><p>${tag} ${body}</p><div class="btns">${b2}${this.btn('deselect', 'Close')}</div>`;
+    }
+    return '';
+  }
+  renderPanel(force = false) {
+    const h = this.panelHTML();
+    if (force || h !== this.lastPanel) { if (h !== this.lastPanel) { this.panel.innerHTML = h; this.lastPanel = h; } }
+  }
+  private bindPanel() {
+    // act on pointerdown so a panel refresh between press and release can't swallow the tap
+    this.panel.addEventListener('pointerdown', (e) => { const b = (e.target as HTMLElement).closest('button'); if (!b || b.disabled) return; e.preventDefault(); this.act(b.dataset.act!); });
+    this.panel.addEventListener('click', (e) => { if (e.detail !== 0) return; const b = (e.target as HTMLElement).closest('button'); if (b && !b.disabled) this.act(b.dataset.act!); });
+  }
+  private bindBar() {
+    $('#b-build').onclick = () => { if (this.running) this.act('build'); };
+    $('#b-all').onclick = () => { if (!this.running) return; this.view.sel = { kind: 'workers', ids: new Set(workersOf(this.s, this.game.me).map((w) => w.id)) }; this.menu = null; this.view.buildMode = null; this.renderPanel(true); };
+    $('#b-idle').onclick = () => {
+      if (!this.running) return;
+      const idle = workersOf(this.s, this.game.me).filter((w) => !w.task);
+      if (!idle.length) { this.toast('Everyone is busy.'); return; }
+      const w = idle[this.idleIdx++ % idle.length];
+      this.view.sel = { kind: 'workers', ids: new Set([w.id]) }; this.menu = null; this.view.buildMode = null;
+      this.r.centerOn(w.x, w.y); this.renderPanel(true);
+    };
+    $('#b-pause').onclick = () => {
+      if (!this.running) return;
+      this.game.paused = !this.game.paused;
+      $('#b-pause').textContent = this.game.paused ? 'Resume' : 'Pause'; $('#b-pause').classList.toggle('on', this.game.paused);
+    };
+  }
+  private bindKeys() {
+    addEventListener('keydown', (e) => {
+      if (!this.running) return;
+      if (e.key === 'Escape') this.act('deselect');
+      if (e.key === 'b') this.act('build');
+      if (e.key === ' ') { e.preventDefault(); $('#b-pause').click(); }
+    });
+  }
+
+  // ---------- touch / mouse
+  private bindInput() {
+    const cv = this.r.app.canvas;
+    const ptrs = new Map<number, { x: number; y: number; sx: number; sy: number }>();
+    let moved = false, pinchD = 0;
+    cv.addEventListener('pointerdown', (e) => {
+      if (ptrs.size === 0) moved = false;
+      try { cv.setPointerCapture(e.pointerId); } catch { /* not all browsers */ }
+      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY }); pinchD = 0;
+    });
+    cv.addEventListener('pointermove', (e) => {
+      const p = ptrs.get(e.pointerId); if (!p) return;
+      if (ptrs.size === 1) {
+        if (Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > 9) moved = true;
+        if (moved) { this.r.cam.x -= (e.clientX - p.x) / this.r.z; this.r.cam.y -= (e.clientY - p.y) / this.r.z; this.r.clampCam(); }
+      } else if (ptrs.size === 2) {
+        moved = true; p.x = e.clientX; p.y = e.clientY;
+        const [a, b] = [...ptrs.values()], d = Math.hypot(a.x - b.x, a.y - b.y);
+        if (pinchD) this.r.zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, d / pinchD);
+        pinchD = d; return;
+      }
+      p.x = e.clientX; p.y = e.clientY;
+    });
+    const up = (e: PointerEvent) => {
+      if (!ptrs.has(e.pointerId)) return;
+      if (ptrs.size === 1 && !moved && this.running && e.type === 'pointerup') this.tap(e.clientX, e.clientY);
+      ptrs.delete(e.pointerId); pinchD = 0;
+    };
+    cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+    cv.addEventListener('wheel', (e) => { e.preventDefault(); this.r.zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.12 : 1 / 1.12); }, { passive: false });
+    this.mini.addEventListener('pointerdown', (e) => {
+      const rect = this.mini.getBoundingClientRect(), m = this.drawMini();
+      const wx = (e.clientX - rect.left - m.ox) / m.s, wy = (e.clientY - rect.top - m.oy) / m.s;
+      this.r.cam.x = wx - this.r.vw / this.r.z / 2; this.r.cam.y = wy - this.r.vh / this.r.z / 2; this.r.clampCam();
+    });
+  }
+
+  // ---------- HUD, minimap, toasts
+  private setT(id: string, v: string) { if (this.hudCache[id] !== v) { this.hudCache[id] = v; document.getElementById(id)!.textContent = v; } }
+  private hud() {
+    const s = this.s, me = this.me;
+    this.setT('r-food', String(Math.floor(me.res.food))); this.setT('r-water', String(Math.floor(me.res.water)));
+    this.setT('r-stone', String(Math.floor(me.res.stone))); this.setT('r-bbd', String(Math.floor(me.res.bbd)));
+    this.setT('r-pop', `${workersOf(s, me.id).length}/${popCap(s, me.id)}`);
+    this.setT('s-age', me.age === 1 ? (me.ageT >= 0 ? `Co-op Age in ${Math.ceil(AGE_T - me.ageT)}s` : 'Village Age') : 'Co-op Age');
+    const left = s.weather.nextHurr - s.time;
+    this.setT('s-hurr', s.weather.stormT > 0 ? 'Hurricane!' : `Hurricane ${fmtT(left)}`);
+    $('#s-hurr').classList.toggle('warn', left < 60 || s.weather.stormT > 0);
+    const dr = drought(s); $('#s-dry').hidden = !dr; if (dr) this.setT('s-dry', `Drought ${fmtT(s.weather.droughtUntil - s.time)}`);
+    const mine = s.mode === 'coop' ? teamOwned(s, me.team) : owned(s, me.id);
+    this.setT('s-par', `You ${mine}/${winTarget(s)} · AgroCorp ${owned(s, AGRO)}/6`);
+    $('#s-rival').style.width = Math.min(100, (s.agro.bbd / rivalCost(s)) * 100) + '%';
+  }
+  drawMini() {
+    const mini = this.mini, g = mini.getContext('2d')!, r = this.r;
+    const mw = mini.clientWidth, mh = mini.clientHeight, d = Math.min(2, window.devicePixelRatio || 1);
+    if (mini.width !== mw * d) { mini.width = mw * d; mini.height = mh * d; }
+    g.setTransform(d, 0, 0, d, 0, 0); g.fillStyle = '#0A3478'; g.fillRect(0, 0, mw, mh);
+    const WW = W * T, HH = (this.s.map.land.length / W) * T;
+    const sc = Math.min(mw / WW, mh / HH), ox = (mw - WW * sc) / 2, oy = (mh - HH * sc) / 2;
+    g.drawImage(r.terrainCanvas, ox, oy, WW * sc, HH * sc); g.drawImage(r.ownCanvas, ox, oy, WW * sc, HH * sc);
+    for (const w of Object.values(this.s.workers)) { g.fillStyle = player(this.s, w.owner)?.color ?? '#fff'; g.fillRect(ox + w.x * T * sc - 1, oy + w.y * T * sc - 1, 2, 2); }
+    g.strokeStyle = '#FFFFFF'; g.lineWidth = 1; g.strokeRect(ox + r.cam.x * sc, oy + r.cam.y * sc, (r.vw / r.z) * sc, (r.vh / r.z) * sc);
+    return { s: sc, ox, oy };
+  }
+  toast(msg: string, kind?: string) {
+    const box = $('#toasts'), el = document.createElement('div');
+    el.className = 'toast' + (kind ? ' ' + kind : ''); el.textContent = msg; box.appendChild(el);
+    while (box.children.length > 3) box.firstChild!.remove();
+    setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 320); }, 4500);
+  }
+
+  // ---------- start / end
+  start() { $('#overlay').hidden = true; this.running = true; this.game.paused = false; this.renderPanel(true); }
+  private end() {
+    this.running = false;
+    const s = this.s, o = s.ended!, won = o.winners.includes(this.game.me);
+    const me = this.me;
+    $('#card').innerHTML = `<div class="flag"><i></i><i></i><i></i></div><div class="kicker">${fmtT(s.time)} played</div>
+      <h1>${won ? 'Food secure!' : o.winners.includes(AGRO) ? 'Bought out' : 'Out-grown'}</h1>
+      <p class="sub">${won ? `Your co-op feeds ${owned(s, me.id)} parishes in the Co-op Age. Barbados eats what Barbados grows.` : o.winners.includes(AGRO) ? `AgroCorp now controls ${owned(s, AGRO)} parishes. Feed more parishes earlier and keep a building in each one.` : `${player(s, o.winners[0])?.name} fed their parishes first.`}</p>
+      <ul><li><strong>${Math.floor(me.stats.food)}</strong> food grown and gathered</li><li><strong>${workersOf(s, me.id).length}</strong> workers, <strong>${Object.values(s.buildings).filter((b) => b.owner === me.id && b.done).length}</strong> buildings standing</li><li><strong>${s.weather.hurrIdx}</strong> hurricanes weathered</li></ul>
+      <button class="btn primary" id="start">Play again</button>`;
+    $('#overlay').hidden = false;
+    $('#start').onclick = () => this.onRestart();
+  }
+}
