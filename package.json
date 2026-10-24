@@ -1,12 +1,17 @@
 {
   "name": "bim-grow-the-island",
   "private": true,
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "dev": "npm run dev -w @bim/client",
-    "build": "npm run build -w @bim/client",
-    "test": "npm test -w @bim/sim",
-    "typecheck": "tsc -p packages/sim && tsc -p apps/client"
+    "dev:server": "npm run dev -w @bim/server",
+    "build": "npm run build -w @bim/client && npm run build -w @bim/server",
+    "start": "npm start -w @bim/server",
+    "test": "npm test -w @bim/sim && npm test -w @bim/server",
+    "typecheck": "tsc -p packages/sim && tsc -p apps/client && tsc -p apps/server"
   },
   "devDependencies": {
     "typescript": "5.8.3"
