@@ -1,0 +1,773 @@
+<title>Bim: Grow the Island</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800&family=Lilita+One&display=swap">
+<style>
+/* Layout: full-screen island map; resource HUD floats top-left, minimap top-right, command dock at the bottom */
+:root{
+  --sea:#0A3478; --ultra:#00267F; --gold:#FFC726; --ink:#071330;
+  --panel:rgba(7,19,48,.92); --panel2:#12306F; --line:rgba(255,199,38,.3);
+  --fg:#F3F6FF; --muted:#A8B5D8; --rival:#E2553F; --leaf:#6CC24A; --water:#5BC0EB; --stone:#D9D2C0; --warn:#FF8A3D;
+  --display:'Lilita One','Arial Rounded MT Bold','Trebuchet MS',system-ui,sans-serif;
+  --body:'Figtree',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%;overflow:hidden}
+[hidden]{display:none!important}
+body{background:var(--sea);color:var(--fg);font-family:var(--body);-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+#game{position:fixed;inset:0;width:100%;height:100%;touch-action:none;display:block}
+#hud{position:fixed;top:0;left:0;right:0;z-index:5;pointer-events:none;display:flex;flex-direction:column;gap:6px;
+  padding-top:calc(env(safe-area-inset-top,0px) + 8px);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.row{display:flex;flex-wrap:wrap;gap:5px}
+.chip{display:inline-flex;align-items:center;gap:5px;background:var(--panel);border:1px solid var(--line);border-radius:999px;
+  padding:4px 9px;font-weight:600;font-size:12.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.chip b{font-weight:800}
+.chip.warn{border-color:var(--warn);color:#FFD9BF;background:rgba(90,30,8,.92)}
+.chip.dry{border-color:#E7B45A;color:#FFE7B8}
+.dot{width:9px;height:9px;border-radius:50%;flex:none}
+.d-food{background:var(--leaf)}.d-water{background:var(--water)}.d-stone{background:var(--stone)}.d-bbd{background:var(--gold)}.d-pop{background:#F2A7C3}
+.rivalbar{width:44px;height:6px;border-radius:3px;background:rgba(255,255,255,.15);overflow:hidden}
+.rivalbar i{display:block;height:100%;background:var(--rival);width:0}
+#mini{align-self:flex-end;pointer-events:auto;width:84px;height:114px;border-radius:10px;border:1px solid var(--line);background:var(--ink);touch-action:none}
+#dock{position:fixed;left:0;right:0;bottom:0;z-index:6;pointer-events:none;display:flex;flex-direction:column;gap:6px;
+  padding-bottom:calc(env(safe-area-inset-bottom,0px) + 10px);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+#toasts{display:flex;flex-direction:column;gap:5px;align-items:center}
+.toast{max-width:460px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:7px 11px;font-size:13px;line-height:1.35;text-align:center;transition:opacity .3s,transform .3s}
+.toast.warn{border-color:var(--warn);background:rgba(90,30,8,.95)}
+.toast.bad{border-color:var(--rival);background:rgba(80,18,18,.95)}
+.toast.good{border-color:var(--leaf);background:rgba(16,60,28,.95)}
+.toast.out{opacity:0;transform:translateY(6px)}
+#panel{pointer-events:auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:11px 13px;max-height:36vh;overflow:auto;max-width:560px;width:100%;align-self:center;box-sizing:border-box}
+#panel h3{margin:0 0 3px;font-family:var(--display);font-weight:400;font-size:18px;letter-spacing:.3px;color:var(--gold);text-wrap:balance}
+#panel p{margin:0 0 8px;color:var(--muted);font-size:13.5px;line-height:1.4}
+#panel p strong{color:var(--fg)}
+.btns{display:flex;flex-wrap:wrap;gap:6px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.btn{font:inherit;font-weight:600;font-size:13px;color:var(--fg);background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 11px;cursor:pointer;text-align:left;line-height:1.25;touch-action:manipulation}
+.btn small{display:block;font-weight:400;color:var(--muted);font-size:11.5px;margin-top:2px}
+.btn.primary{background:var(--gold);color:var(--ink);border-color:var(--gold)}
+.btn.primary small{color:#4a3a05}
+.btn:disabled{opacity:.42;cursor:default}
+.btn:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+#bar{pointer-events:auto;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;max-width:560px;width:100%;align-self:center}
+#bar .btn{text-align:center;padding:10px 4px;background:var(--panel)}
+#bar .btn.on{background:var(--gold);color:var(--ink)}
+.tag{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;padding:2px 7px;border-radius:999px;margin-right:4px}
+.t-you{background:var(--gold);color:var(--ink)}.t-rival{background:var(--rival);color:#fff}.t-free{background:rgba(255,255,255,.14);color:var(--fg)}
+#overlay{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;background:rgba(4,12,34,.82);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px;overflow:auto}
+.card{max-width:440px;width:100%;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px 20px 20px;box-sizing:border-box}
+.flag{display:flex;height:8px;border-radius:4px;overflow:hidden;width:72px;margin-bottom:14px}
+.flag i{flex:1;background:var(--ultra)}.flag i:nth-child(2){background:var(--gold)}
+.card h1{font-family:var(--display);font-weight:400;font-size:40px;line-height:1;margin:0 0 6px;color:var(--gold);text-wrap:balance}
+.card .sub{margin:0 0 16px;color:var(--fg);font-size:15px;line-height:1.45}
+.card ul{margin:0 0 18px;padding-left:18px;color:var(--muted);font-size:13.5px;line-height:1.5;display:flex;flex-direction:column;gap:4px}
+.card ul strong{color:var(--fg)}
+.card .btn{width:100%;text-align:center;font-size:16px;padding:13px}
+.credit{margin:12px 0 0;font-size:11px;color:var(--muted);text-align:center}
+.kicker{font-size:11px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+@media (prefers-reduced-motion:reduce){.toast{transition:none}}
+</style>
+
+<canvas id="game" aria-label="Map of Barbados"></canvas>
+
+<div id="hud">
+  <div class="row">
+    <span class="chip"><span class="dot d-food"></span><b id="r-food">0</b></span>
+    <span class="chip"><span class="dot d-water"></span><b id="r-water">0</b></span>
+    <span class="chip"><span class="dot d-stone"></span><b id="r-stone">0</b></span>
+    <span class="chip"><span class="dot d-bbd"></span><b id="r-bbd">0</b>&nbsp;BBD</span>
+    <span class="chip"><span class="dot d-pop"></span><b id="r-pop">0</b></span>
+  </div>
+  <div class="row">
+    <span class="chip" id="s-age">Village Age</span>
+    <span class="chip" id="s-hurr">Hurricane 5:00</span>
+    <span class="chip dry" id="s-dry" hidden>Drought</span>
+    <span class="chip"><span id="s-par">You 1/6</span><span class="rivalbar" title="AgroCorp's next buyout"><i id="s-rival"></i></span></span>
+  </div>
+  <canvas id="mini" aria-label="Minimap"></canvas>
+</div>
+
+<div id="dock">
+  <div id="toasts" aria-live="polite"></div>
+  <div id="panel"></div>
+  <div id="bar">
+    <button class="btn" id="b-build">Build</button>
+    <button class="btn" id="b-idle">Idle</button>
+    <button class="btn" id="b-all">All workers</button>
+    <button class="btn" id="b-pause">Pause</button>
+  </div>
+</div>
+
+<div id="overlay">
+  <div class="card" id="card">
+    <div class="flag"><i></i><i></i><i></i></div>
+    <div class="kicker">Damian Grows presents</div>
+    <h1>Bim: Grow the Island</h1>
+    <p class="sub">Grow food for Barbados. Feed <strong>6 of the 11 parishes</strong> and reach the <strong>Co-op Age</strong> before AgroCorp buys up the island.</p>
+    <ul>
+      <li><strong>Tap a worker</strong>, then tap breadfruit, coral stone, a spring or flying fish to gather.</li>
+      <li><strong>Build</strong> chattel houses, farm plots, cisterns and seawalls in your parishes.</li>
+      <li><strong>Tap a parish</strong> next to yours to feed it and win it over.</li>
+      <li>Hurricanes hit every few minutes. <strong>Seawalls</strong> shield nearby buildings.</li>
+      <li>Drag to pan. Pinch or scroll to zoom.</li>
+    </ul>
+    <button class="btn primary" id="start">Start growing</button>
+    <p class="credit">Parish borders: geoBoundaries / Wikimedia Commons, CC BY 2.5.</p>
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+const W=52,H=66,T=24,CARRY=10,SPEED=2.4,TRAIN=12,AGE_T=40,SEA_R=5,WIN_N=6;
+// Real parish borders (geoBoundaries / Wikimedia Commons, CC BY 2.5), projected to tile units. 1 tile ≈ 0.58 km.
+const GEO={"proj":[-59.65071,13.33465,186.662,190.428,4.5,5.427],"par":[["St. Lucy",[18.15,12.37,18.15,12.34,18.21,12.26,18.31,12.22,18.51,12.21,18.66,12.17,18.7,12.08,18.75,12.0,18.84,11.93,18.82,11.85,18.75,11.78,18.68,11.73,18.6,11.69,18.58,11.63,18.6,11.54,18.6,11.45,18.53,11.36,18.39,11.3,18.29,11.26,18.22,11.28,18.15,11.34,18.09,11.31,18.05,11.24,18.07,11.16,18.12,11.01,18.2,10.92,18.29,10.87,18.36,10.78,18.33,10.65,18.25,10.52,18.14,10.4,17.98,10.25,17.92,10.19,17.84,10.12,17.69,10.04,17.51,9.99,17.26,9.9,17.15,9.86,17.06,9.84,16.89,9.82,16.85,9.75,16.8,9.64,16.68,9.65,16.59,9.54,16.5,9.42,16.35,9.25,16.24,9.17,16.11,9.05,16.03,8.97,15.97,8.88,15.83,8.8,15.78,8.73,15.76,8.64,15.7,8.61,15.61,8.59,15.55,8.53,15.45,8.44,15.38,8.34,15.3,8.23,15.15,8.14,15.04,8.07,14.95,8.03,14.86,7.98,14.8,7.86,14.82,7.78,14.89,7.77,14.91,7.71,14.85,7.64,14.75,7.57,14.66,7.5,14.56,7.37,14.34,7.22,14.22,7.15,14.12,7.08,14.06,6.95,13.99,6.81,13.86,6.78,13.71,6.79,13.52,6.71,13.45,6.63,13.37,6.55,13.21,6.44,13.09,6.38,12.99,6.33,12.86,6.29,12.83,6.22,12.82,6.14,12.75,6.09,12.69,6.03,12.66,5.93,12.58,5.87,12.46,5.84,12.31,5.81,12.18,5.77,12.06,5.73,12.01,5.68,11.9,5.63,11.79,5.6,11.72,5.52,11.63,5.44,11.54,5.43,11.46,5.46,11.36,5.43,11.29,5.43,11.22,5.48,11.15,5.54,11.08,5.58,11.0,5.6,10.82,5.6,10.73,5.61,10.67,5.64,10.6,5.68,10.51,5.69,10.43,5.65,10.34,5.55,10.22,5.49,10.07,5.56,10.02,5.62,9.98,5.73,9.86,5.78,9.79,5.78,9.7,5.92,9.42,6.01,9.19,6.02,9.06,6.06,8.97,6.19,8.86,6.25,8.66,6.18,8.55,6.2,8.4,6.31,8.24,6.5,8.16,6.63,8.02,6.58,7.87,6.54,7.66,6.61,7.53,6.76,7.36,6.87,7.15,6.97,7.0,7.16,6.93,7.3,6.9,7.42,6.87,7.55,6.8,7.71,6.67,7.92,6.5,8.07,6.47,8.21,6.39,8.36,6.14,8.59,5.93,8.78,5.81,8.9,5.75,9.09,5.64,9.2,5.55,9.35,5.19,9.87,4.91,10.21,4.68,10.35,4.64,10.45,4.52,10.78,4.5,10.93,4.57,11.14,4.55,11.51,4.57,11.68,4.64,11.98,4.65,12.33,4.72,12.76,4.75,13.13,4.78,13.32,4.79,13.55,4.77,13.93,4.69,14.09,4.63,14.35,4.63,14.71,4.64,15.09,4.67,15.4,4.81,15.6,5.0,15.98,5.09,16.3,5.12,16.49,5.22,16.82,5.24,17.02,18.15,12.37]],["St. Peter",[5.24,17.02,5.24,17.11,5.35,17.42,5.49,17.81,5.55,18.08,5.66,18.38,5.77,18.56,5.86,18.72,5.87,19.0,5.87,19.34,5.85,19.55,5.79,19.78,5.72,19.96,5.68,20.24,5.64,20.55,5.6,21.0,5.61,21.16,5.69,21.45,5.77,21.62,5.72,21.86,5.63,22.13,5.6,22.24,5.68,22.46,5.75,22.73,5.68,23.03,5.58,23.2,5.57,23.37,5.63,23.57,5.66,23.8,5.78,24.04,5.94,24.31,6.01,24.49,5.99,24.8,5.94,25.01,5.94,25.29,5.97,25.49,5.99,25.68,5.96,25.85,5.87,26.09,5.93,26.25,5.94,26.26,7.59,25.77,10.33,24.96,13.1,24.18,13.95,23.94,14.68,20.69,15.12,18.71,16.27,17.03,17.7,15.0,18.95,13.22,18.93,13.21,18.89,13.07,18.83,12.9,18.75,12.83,18.64,12.78,18.52,12.74,18.42,12.72,18.3,12.67,18.2,12.58,18.15,12.47,18.15,12.37,5.24,17.02]],["St. Andrew",[24.78,24.5,24.71,24.3,24.55,24.01,24.44,23.86,24.29,23.72,24.21,23.6,24.12,23.36,24.05,23.19,23.97,23.09,23.87,22.97,23.78,22.85,23.69,22.71,23.6,22.58,23.48,22.45,23.31,22.28,23.16,22.07,23.03,21.92,22.95,21.83,22.82,21.64,22.64,21.37,22.53,21.29,22.39,21.19,22.41,21.05,22.39,20.96,22.24,20.73,22.03,20.39,21.87,19.98,21.78,19.84,21.66,19.61,21.4,19.1,21.31,18.83,21.18,18.58,20.97,18.34,20.91,18.21,20.84,18.1,20.72,17.92,20.65,17.77,20.58,17.59,20.5,17.46,20.31,17.13,20.23,16.95,20.14,16.72,20.07,16.54,20.03,16.39,20.0,16.23,19.95,16.11,19.97,15.88,19.96,15.8,19.95,15.69,19.92,15.56,19.96,15.49,19.98,15.29,19.97,15.11,19.93,14.98,19.86,14.88,19.8,14.79,19.71,14.7,19.64,14.61,19.57,14.45,19.5,14.29,19.38,14.11,19.28,14.0,19.26,13.89,19.27,13.73,19.24,13.58,19.17,13.43,19.1,13.32,19.03,13.27,18.95,13.22,17.7,15.0,16.27,17.03,15.12,18.71,14.68,20.69,13.95,23.94,14.42,27.87,15.53,28.43,16.95,29.21,18.7,30.16,18.71,30.16,19.54,29.01,20.19,28.09,20.86,27.17,22.02,26.39,23.32,25.48,24.78,24.5]],["St. James",[13.95,23.94,13.1,24.18,10.33,24.96,7.59,25.77,5.94,26.26,6.09,26.53,6.2,26.77,6.22,27.06,6.11,27.29,6.08,27.45,6.11,27.68,6.18,28.03,6.26,28.45,6.3,28.66,6.42,28.92,6.46,29.11,6.52,29.43,6.51,29.75,6.47,30.11,6.38,30.46,6.3,30.72,6.17,30.89,6.07,31.18,6.03,31.5,6.06,31.74,6.2,31.91,6.3,32.23,6.32,32.5,6.49,32.83,6.68,33.01,6.85,33.3,6.85,33.5,6.76,33.77,6.69,34.07,6.62,34.44,6.6,34.8,6.6,35.01,6.61,35.22,6.74,35.61,6.86,35.71,6.96,35.93,6.95,36.29,6.83,36.52,6.85,36.73,6.85,36.96,6.94,37.18,7.02,37.4,7.04,37.64,6.97,37.89,6.91,38.28,6.92,38.56,7.04,38.86,7.04,39.27,6.94,39.61,6.88,39.78,6.86,40.19,6.88,40.51,6.78,41.05,6.71,41.42,6.72,41.67,6.81,41.87,6.94,41.99,6.97,42.33,7.06,42.81,7.23,43.06,7.23,43.23,10.42,41.91,11.45,41.49,11.19,38.11,11.01,35.21,10.87,33.24,13.04,30.98,13.68,30.34,14.42,27.87,13.95,23.94]],["St. Joseph",[25.16,34.71,26.06,33.81,27.73,32.17,29.35,30.6,30.82,29.16,30.72,29.12,30.56,29.09,30.4,29.1,30.18,28.99,29.92,28.83,29.69,28.65,29.56,28.64,29.46,28.65,29.38,28.7,29.21,28.71,29.03,28.67,28.91,28.6,28.77,28.5,28.62,28.41,28.41,28.36,28.23,28.29,27.88,28.05,27.7,27.94,27.6,27.8,27.46,27.67,27.31,27.59,27.12,27.45,27.0,27.3,26.8,27.03,26.72,26.91,26.6,26.82,26.5,26.72,26.42,26.61,26.37,26.47,26.31,26.3,26.2,26.2,26.04,26.09,25.88,26.0,25.78,25.91,25.6,25.72,25.5,25.55,25.4,25.4,25.29,25.3,25.16,25.12,25.05,24.9,24.96,24.81,24.87,24.67,24.79,24.52,24.78,24.5,23.32,25.48,22.02,26.39,20.86,27.17,20.19,28.09,19.54,29.01,18.71,30.16,19.3,30.49,20.33,31.58,21.54,32.87,21.93,33.26,22.17,34.45,22.74,37.06,22.76,37.06,23.18,36.68,24.47,35.4,25.16,34.71]],["St. Thomas",[22.74,37.06,22.17,34.45,21.93,33.26,21.54,32.87,20.33,31.58,19.3,30.49,18.71,30.16,18.7,30.16,16.95,29.21,15.53,28.43,14.42,27.87,13.68,30.34,13.04,30.98,10.87,33.24,11.01,35.21,11.19,38.11,11.45,41.49,12.98,40.87,14.59,40.23,17.33,39.13,17.49,39.07,20.84,37.78,22.74,37.06]],["St. John",[31.44,43.2,31.44,43.19,33.62,41.13,34.79,40.0,36.35,38.54,37.7,37.27,38.82,36.21,40.09,35.05,40.64,34.55,40.63,34.51,40.54,34.38,40.47,34.25,40.31,34.19,40.16,34.21,40.1,34.3,39.98,34.37,39.76,34.41,39.65,34.47,39.59,34.6,39.52,34.75,39.37,34.84,39.08,34.92,38.86,34.92,38.63,34.84,38.36,34.68,38.2,34.54,38.09,34.39,37.96,34.19,37.81,34.0,37.65,33.87,37.54,33.73,37.43,33.64,37.26,33.55,37.05,33.44,36.94,33.33,36.86,33.16,36.77,33.05,36.62,33.01,36.39,32.94,36.17,32.84,35.97,32.77,35.84,32.79,35.7,32.85,35.6,32.84,35.44,32.76,35.27,32.68,35.19,32.57,35.17,32.38,35.15,32.12,35.1,31.94,35.05,31.74,34.95,31.59,34.79,31.5,34.68,31.44,34.47,31.39,34.35,31.43,34.27,31.52,34.11,31.58,33.91,31.57,33.78,31.54,33.54,31.45,33.4,31.38,33.25,31.28,33.08,31.13,32.91,31.0,32.74,30.88,32.6,30.74,32.45,30.67,32.34,30.62,32.26,30.5,32.13,30.38,31.94,30.25,31.85,30.11,31.67,29.94,31.55,29.76,31.31,29.54,31.24,29.42,31.13,29.3,30.93,29.2,30.82,29.16,29.35,30.6,27.73,32.17,26.06,33.81,25.16,34.71,26.08,35.99,27.38,37.7,28.57,39.34,29.9,41.11,31.44,43.2]],["St. George",[31.44,43.2,29.9,41.11,28.57,39.34,27.38,37.7,26.08,35.99,25.16,34.71,24.47,35.4,23.18,36.68,22.76,37.06,22.74,37.06,20.84,37.78,17.49,39.07,17.33,39.13,17.59,40.09,17.85,41.23,18.14,42.51,18.43,43.74,18.75,45.05,19.05,46.39,19.37,47.73,19.66,48.97,20.05,50.64,21.58,49.85,22.75,49.27,24.06,48.61,25.13,48.08,26.4,47.45,27.69,46.81,29.32,46.02,30.52,45.45,31.44,43.2]],["St. Michael",[17.33,39.13,14.59,40.23,12.98,40.87,11.45,41.49,10.42,41.91,7.23,43.23,7.23,43.29,7.2,43.49,7.2,43.82,7.4,44.16,7.47,44.53,7.52,44.87,7.62,45.07,7.77,45.55,8.08,45.85,8.27,46.09,8.54,46.4,8.75,46.83,8.84,47.25,8.86,47.65,8.9,48.02,8.99,48.28,9.15,48.64,9.04,48.9,8.43,49.26,8.53,49.54,8.55,50.05,8.77,50.17,9.11,50.31,9.51,50.49,9.74,50.68,9.8,50.84,9.93,50.91,10.16,51.0,10.34,51.01,10.48,50.99,10.69,51.02,10.93,51.09,11.22,51.24,11.39,51.4,11.67,51.59,11.9,51.77,12.06,51.96,12.1,52.09,12.17,52.38,12.13,52.63,12.14,53.03,12.17,53.27,12.13,53.49,12.06,53.65,11.91,53.85,11.78,53.92,11.71,53.9,11.62,53.98,11.61,54.13,11.64,54.26,11.74,54.33,11.9,54.34,12.08,54.33,12.32,54.39,12.64,54.54,14.39,53.61,15.48,53.03,16.38,52.56,17.39,52.03,18.75,51.31,20.05,50.64,19.66,48.97,19.37,47.73,19.05,46.39,18.75,45.05,18.43,43.74,18.14,42.51,17.85,41.23,17.59,40.09,17.33,39.13]],["St. Philip",[37.48,54.43,37.49,54.43,37.93,54.06,38.39,53.75,38.62,53.62,38.88,53.42,39.19,53.29,39.29,53.24,39.5,53.2,39.6,53.07,39.85,52.82,39.99,52.76,40.09,52.68,40.27,52.54,40.56,52.24,40.65,52.05,40.8,51.94,41.02,51.76,41.2,51.66,41.34,51.39,41.43,51.14,41.55,50.93,41.59,50.73,41.7,50.49,41.88,50.13,42.08,49.89,42.19,49.81,42.28,49.81,42.4,49.86,42.49,49.9,42.57,49.8,42.62,49.62,42.79,49.44,42.91,49.37,42.99,49.2,43.04,49.04,43.07,48.95,43.23,48.76,43.43,48.52,43.57,48.2,43.76,47.79,43.9,47.53,43.99,47.45,44.11,47.35,44.18,47.24,44.29,47.13,44.43,47.05,44.54,47.02,44.61,46.94,44.69,46.8,44.78,46.65,44.84,46.57,44.91,46.47,44.98,46.33,45.09,46.25,45.23,46.2,45.26,46.11,45.34,45.97,45.44,45.86,45.51,45.7,45.62,45.67,45.7,45.57,45.72,45.42,45.78,45.25,45.81,44.99,45.82,44.7,45.86,44.53,46.13,44.3,46.23,44.21,46.36,43.98,46.33,43.86,46.3,43.79,46.31,43.63,46.36,43.56,46.54,43.48,46.66,43.43,46.64,43.26,46.66,43.09,46.77,42.96,46.88,42.9,46.81,42.8,46.91,42.75,47.04,42.71,47.06,42.55,47.15,42.37,47.17,42.19,47.22,41.98,47.26,41.71,47.25,41.58,47.32,41.43,47.32,41.27,47.4,41.09,47.5,40.89,47.49,40.58,47.37,40.49,47.22,40.37,47.16,40.16,47.17,39.95,47.25,39.78,47.24,39.62,47.09,39.47,46.95,39.47,46.81,39.48,46.59,39.42,46.5,39.23,46.38,38.98,46.33,38.79,46.28,38.56,46.07,38.33,45.94,38.26,45.79,38.26,45.52,38.27,45.43,38.18,45.46,38.03,45.35,37.86,45.07,37.8,44.91,37.86,44.6,37.92,44.27,37.97,44.12,38.0,44.01,38.0,43.89,37.94,43.8,37.85,43.67,37.82,43.6,37.71,43.48,37.7,43.42,37.77,43.28,37.78,43.14,37.68,43.06,37.57,43.01,37.4,42.91,37.27,42.69,37.11,42.61,37.05,42.42,37.06,42.34,37.0,42.28,36.78,42.24,36.57,42.18,36.42,42.1,36.33,41.98,36.39,41.92,36.33,41.92,36.26,41.96,36.12,42.05,36.04,42.1,35.98,42.12,35.86,42.05,35.81,41.94,35.85,41.83,35.89,41.72,35.87,41.62,35.72,41.51,35.57,41.42,35.43,41.23,35.28,41.01,35.02,40.93,34.94,40.78,34.82,40.7,34.7,40.64,34.55,40.09,35.05,38.82,36.21,37.7,37.27,36.35,38.54,34.79,40.0,33.62,41.13,31.44,43.19,31.44,43.2,30.52,45.45,31.62,46.91,32.51,48.03,33.32,49.08,34.15,50.15,34.92,51.14,35.63,52.07,36.32,52.94,37.06,53.91,37.48,54.43]],["Christ Church",[20.05,50.64,18.75,51.31,17.39,52.03,16.38,52.56,15.48,53.03,14.39,53.61,12.64,54.54,12.67,54.55,12.83,54.61,13.16,54.73,13.41,54.76,13.72,54.83,14.01,55.0,14.16,55.07,14.6,55.13,14.82,55.13,15.01,55.14,15.3,55.19,15.45,55.22,15.64,55.2,15.87,55.15,16.03,55.16,16.3,55.26,16.36,55.37,16.54,55.52,16.86,55.57,17.21,55.64,17.34,55.71,17.5,55.85,17.59,55.96,17.85,56.0,18.06,56.0,18.4,56.09,18.48,56.1,18.54,56.19,18.62,56.31,18.8,56.38,19.15,56.44,19.38,56.49,19.86,56.57,20.02,56.65,20.29,56.86,20.43,56.95,20.68,56.95,20.93,56.89,21.21,56.8,21.57,56.75,21.74,56.71,22.0,56.73,22.31,56.69,22.57,56.62,22.79,56.62,22.95,56.69,23.16,56.78,23.33,56.81,23.79,56.89,24.14,56.98,24.58,57.14,24.84,57.32,25.0,57.49,25.05,57.67,25.29,57.74,25.42,57.82,25.51,57.96,25.55,58.06,25.59,58.23,25.64,58.43,25.74,58.54,25.97,58.81,26.06,58.94,26.13,59.14,26.12,59.33,26.07,59.49,26.07,59.61,26.16,59.75,26.26,59.86,26.44,60.07,26.58,60.25,26.79,60.33,27.21,60.5,27.51,60.57,27.94,60.53,28.14,60.48,28.3,60.4,28.49,60.34,28.68,60.31,28.98,60.31,29.1,60.31,29.36,60.24,29.67,60.11,29.94,59.95,30.18,59.77,30.31,59.69,30.54,59.57,30.74,59.49,31.13,59.33,31.31,59.23,31.52,59.1,31.67,59.11,31.76,59.18,31.89,59.21,32.06,59.07,32.13,58.9,32.12,58.81,32.3,58.4,32.49,58.14,32.87,57.53,33.05,57.25,33.37,56.82,33.64,56.46,33.95,56.43,34.27,56.45,34.5,56.44,34.88,56.31,35.14,56.22,35.49,56.03,35.72,55.87,36.0,55.67,36.18,55.54,36.31,55.33,36.45,55.18,36.8,54.94,37.15,54.69,37.48,54.43,37.06,53.91,36.32,52.94,35.63,52.07,34.92,51.14,34.15,50.15,33.32,49.08,32.51,48.03,31.62,46.91,30.52,45.45,29.32,46.02,27.69,46.81,26.4,47.45,25.13,48.08,24.06,48.61,22.75,49.27,21.58,49.85,20.05,50.64]]]};
+const [LON0,LAT1,KX,KY,OX,OY]=GEO.proj;
+const toT=(lat,lon)=>[OX+(lon-LON0)*KX,OY+(LAT1-lat)*KY];
+const KM=1/0.5806; // tiles per km
+// Terrain: Mount Hillaby, the Scotland District, the central ridge, Hackleton's Cliff, St. Lucy plateau, Christ Church ridge
+const HILLS=[[13.200,-59.580,1.0,3.0],[13.228,-59.556,.55,2.2],[13.168,-59.592,.65,3.4],[13.178,-59.522,.6,1.6],[13.140,-59.545,.45,3.2],[13.300,-59.622,.32,2.8],[13.085,-59.552,.28,2.6],[13.250,-59.605,.45,2.6]].map(([la,lo,h,s])=>{const[x,y]=toT(la,lo);return{x,y,h,s:s*KM};});
+const SCOT=(()=>{const[x,y]=toT(13.225,-59.553);return{x,y};})();
+const TOWNS=[['Bridgetown',13.0975,-59.6167,3],['Speightstown',13.2500,-59.6400,2],['Holetown',13.1870,-59.6360,2],['Oistins',13.0660,-59.5410,2],['Bathsheba',13.2130,-59.5240,1],['Six Cross Roads',13.1180,-59.4780,1],['Belleplaine',13.2420,-59.5640,1],['Crab Hill',13.3140,-59.6310,1]].map(([n,la,lo,s])=>{const[x,y]=toT(la,lo);return{n,x,y,s};});
+const ROADS=[
+  [[13.0975,-59.6140],[13.125,-59.626],[13.155,-59.633],[13.187,-59.632],[13.220,-59.635],[13.250,-59.636],[13.285,-59.632],[13.314,-59.630]],
+  [[13.0990,-59.6100],[13.130,-59.600],[13.165,-59.592],[13.200,-59.585],[13.225,-59.575],[13.242,-59.564]],
+  [[13.0990,-59.6080],[13.130,-59.585],[13.160,-59.565],[13.190,-59.545],[13.213,-59.527]],
+  [[13.0970,-59.6060],[13.105,-59.570],[13.112,-59.530],[13.118,-59.480]],
+  [[13.0950,-59.6070],[13.080,-59.580],[13.067,-59.545],[13.070,-59.510],[13.090,-59.490],[13.118,-59.480]],
+  [[13.250,-59.638],[13.255,-59.610],[13.248,-59.585],[13.242,-59.564],[13.225,-59.540],[13.213,-59.527]]
+].map(r=>r.map(([la,lo])=>toT(la,lo)));
+const RUNWAY=[toT(13.0712,-59.5040),toT(13.0790,-59.4800)];
+// Atlantic side (rocky, surf) is east of a line from North Point to the St. Philip corner, plus the St. Lucy cliffs
+const ROCK_A=toT(13.335,-59.625),ROCK_B=toT(13.103,-59.428),ROCK_N=toT(13.302,0)[1];
+const HOME_P=8,HOME_R=0;
+const NT={
+  tree:{label:'Breadfruit tree',res:'food',rate:.9,max:120},
+  fish:{label:'Flying fish',res:'food',rate:.8,max:200},
+  rock:{label:'Coral stone',res:'stone',rate:.75,max:250},
+  spring:{label:'Spring',res:'water',rate:1,max:Infinity}
+};
+const BT={
+  tc:{name:'Town Centre',w:2,h:2,cost:{},hp:1200,pop:5,drop:true,build:1,desc:'Trains workers and takes drop-offs. Advance your age here.'},
+  house:{name:'Chattel House',cost:{stone:40},hp:200,pop:5,build:10,desc:'+5 population.'},
+  farm:{name:'Farm Plot',cost:{stone:50},hp:150,build:10,desc:'One worker grows food here forever. Uses a little water.'},
+  depot:{name:'Co-op Depot',cost:{stone:60},hp:300,drop:true,build:14,desc:'Workers drop off resources here, so trips are shorter.'},
+  cistern:{name:'Cistern',cost:{stone:50,bbd:20},hp:250,build:12,desc:'Catches rain: +0.5 water/s. Dry in a drought.'},
+  seawall:{name:'Seawall',cost:{stone:80},hp:600,coast:true,build:16,desc:'Shields buildings within 5 tiles from hurricanes. Coast tiles only.'},
+  market:{name:'Market',cost:{stone:100,bbd:40},hp:350,build:18,desc:'Sell surplus food and stone, or truck in water.'},
+  aqua:{name:'Aquaponics',age:2,cost:{stone:120,bbd:80},hp:300,build:22,desc:'Fish and greens together: +2 food/s, uses 0.5 water/s. Half speed without solar nearby.'},
+  solar:{name:'Solar Array',age:2,cost:{stone:60,bbd:100},hp:200,build:14,desc:'Powers aquaponics within 5 tiles.'},
+  hq:{name:'AgroCorp HQ',w:2,h:2,cost:{},hp:9999,build:1,desc:''}
+};
+const BUILD_LIST=['house','farm','depot','cistern','seawall','market','aqua','solar'];
+const AGE_COST={food:400,water:150,stone:200,bbd:150};
+const HNAMES=['Arlo','Bree','Cosmo','Della','Ezra','Fern','Gus','Hana','Ivo','Jules'];
+const HOUSE_COL=['#F4A6B8','#9EE0C9','#FFE08A','#9CC9F5','#F7B98A','#C9B6F2'];
+const DIRS=[[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+const RM=matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const $=s=>document.querySelector(s);
+const cv=$('#game'),ctx=cv.getContext('2d');
+const mini=$('#mini'),mctx=mini.getContext('2d');
+let DPR=1,VW=0,VH=0;
+
+let urban,elev,scot,TS=2,land,coast,pid,depth,parishes,nodes,nodeAt,buildings,bAt,workers,res,age,time,nextHurr,hurrWarned,nextDrought,droughtUntil,nextPest,
+    rivalBBD,stormFx,running=false,paused=false,ended=false,sel=null,menu=null,buildMode=null,marks,stats,terrC,ownC,cam={x:0,y:0},z=1,
+    seed=1,WID=0,BID=0,hurrIdx=0,idleIdx=0,ageT=-1;
+
+function rnd(){seed=(seed*16807)%2147483647;return(seed-1)/2147483646;}
+function inPolyF(x,y,a){let c=false;const n=a.length;for(let i=0,j=n-2;i<n;j=i,i+=2){const xi=a[i],yi=a[i+1],xj=a[j],yj=a[j+1];if((yi>y)!==(yj>y)&&x<(xj-xi)*(y-yi)/(yj-yi)+xi)c=!c;}return c;}
+function heightAt(x,y){let h=.08;for(const k of HILLS){const d=(x-k.x)**2+(y-k.y)**2;h+=k.h*Math.exp(-d/(2*k.s*k.s));}return h;}
+function scotAt(x,y){const dx=(x-SCOT.x)/(3.0*KM),dy=(y-SCOT.y)/(4.6*KM);return Math.exp(-(dx*dx+dy*dy)*1.6);}
+const ix=i=>i%W, iy=i=>(i/W)|0;
+const inB=(x,y)=>x>=0&&y>=0&&x<W&&y<H;
+function passable(i){return land[i]&&!nodeAt[i]&&!bAt[i];}
+const drought=()=>droughtUntil>time;
+const owned=o=>parishes.filter(p=>p.owner===o).length;
+
+// ---------- world generation
+function newGame(){
+  seed=1031;WID=0;BID=0;hurrIdx=0;idleIdx=0;ageT=-1;
+  land=new Uint8Array(W*H);coast=new Uint8Array(W*H);pid=new Int8Array(W*H).fill(-1);depth=new Uint8Array(W*H);
+  urban=new Uint8Array(W*H);elev=new Float32Array(W*H);scot=new Float32Array(W*H);
+  parishes=GEO.par.map(([name,poly],id)=>({id,name,poly,owner:0,tiles:[],adj:new Set(),lx:0,ly:0}));
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;elev[i]=heightAt(x+.5,y+.5);scot[i]=scotAt(x+.5,y+.5);
+    for(const p of parishes)if(inPolyF(x+.5,y+.5,p.poly)){land[i]=1;pid[i]=p.id;p.tiles.push(i);break;}}
+  for(let i=0;i<W*H;i++)if(land[i]){const x=ix(i),y=iy(i);for(const[dx,dy]of DIRS.slice(0,4)){const nx=x+dx,ny=y+dy;if(!inB(nx,ny)||!land[ny*W+nx]){coast[i]=1;break;}}}
+  parishes.forEach(p=>{let sx=0,sy=0;p.tiles.forEach(i=>{sx+=ix(i)+.5;sy+=iy(i)+.5;});const mx=sx/p.tiles.length,my=sy/p.tiles.length;
+    const c=p.tiles.reduce((b,i)=>((ix(i)+.5-mx)**2+(iy(i)+.5-my)**2)<((ix(b)+.5-mx)**2+(iy(b)+.5-my)**2)?i:b,p.tiles[0]);
+    const inside=p.tiles.includes(Math.floor(my)*W+Math.floor(mx));p.lx=inside?mx:ix(c)+.5;p.ly=inside?my:iy(c)+.5;});
+  TOWNS.forEach(t=>{const r=t.s*.75+.4;for(let y=Math.floor(t.y-r);y<=t.y+r;y++)for(let x=Math.floor(t.x-r);x<=t.x+r;x++)if(inB(x,y)&&Math.hypot(x+.5-t.x,y+.5-t.y)<=r)urban[y*W+x]=1;});
+  for(let i=0;i<W*H;i++)if(land[i]){const x=ix(i),y=iy(i);[[1,0],[0,1]].forEach(([dx,dy])=>{const nx=x+dx,ny=y+dy;if(!inB(nx,ny))return;const j=ny*W+nx;if(land[j]&&pid[j]!==pid[i]){parishes[pid[i]].adj.add(pid[j]);parishes[pid[j]].adj.add(pid[i]);}});}
+  // sea depth from land
+  const dist=new Int16Array(W*H).fill(-1),q=[];
+  for(let i=0;i<W*H;i++)if(land[i]){dist[i]=0;q.push(i);}
+  for(let h=0;h<q.length;h++){const c=q[h],x=ix(c),y=iy(c);for(const[dx,dy]of DIRS.slice(0,4)){const nx=x+dx,ny=y+dy;if(!inB(nx,ny))continue;const n=ny*W+nx;if(dist[n]<0){dist[n]=dist[c]+1;q.push(n);}}}
+  for(let i=0;i<W*H;i++)depth[i]=Math.min(9,Math.max(0,dist[i]));
+
+  nodes=[];nodeAt=new Array(W*H).fill(null);buildings=[];bAt=new Array(W*H).fill(null);workers=[];marks=[];
+  parishes[HOME_P].owner=1;parishes[HOME_R].owner=2;
+  const hq=findSpot(parishes[HOME_R]),tc=findSpot(parishes[HOME_P]);
+  addBuilding('hq',hq[0],hq[1],2,true);
+  const TC=addBuilding('tc',tc[0],tc[1],1,true);
+
+  const free=i=>land[i]&&!coast[i]&&!urban[i]&&!nodeAt[i]&&!bAt[i]&&farFrom(i,tc,3.5)&&farFrom(i,hq,3);
+  // Coral stone only where the coral cap is (not the Scotland District's clay); springs in the wetter uplands
+  const ok={tree:()=>true,rock:i=>scot[i]<.3,spring:i=>elev[i]>.38};
+  const cluster=(type,count,size)=>{for(let c=0;c<count;c++){let s=-1;
+      for(let t=0;t<30;t++){const p=parishes[Math.floor(rnd()*parishes.length)];const j=p.tiles[Math.floor(rnd()*p.tiles.length)];if(ok[type](j)){s=j;break;}}
+      if(s<0)continue;
+      for(let k=0;k<size;k++){const x=ix(s)+Math.floor(rnd()*3)-1,y=iy(s)+Math.floor(rnd()*3)-1;if(!inB(x,y))continue;const i=y*W+x;if(free(i)&&ok[type](i))addNode(type,i);}}};
+  cluster('tree',44,4);cluster('rock',30,3);cluster('spring',11,1);
+  for(let i=0;i<W*H;i++)if(!land[i]&&depth[i]===1&&rnd()<.09)addNode('fish',i);
+  // guaranteed starting resources near the Town Centre
+  const ring=(type,rmin,rmax,n)=>{let tries=0,placed=0;const cx=tc[0]+1,cy=tc[1]+1;let ax=0,ay=0,anch=false;
+    while(placed<n&&tries++<400){const a=anch?null:rnd()*Math.PI*2,r=rmin+rnd()*(rmax-rmin);
+      const x=anch?ax+Math.floor(rnd()*3)-1:Math.round(cx+Math.cos(a)*r),y=anch?ay+Math.floor(rnd()*3)-1:Math.round(cy+Math.sin(a)*r);
+      if(!inB(x,y))continue;const i=y*W+x;if(free(i)&&pid[i]===HOME_P){addNode(type,i);placed++;if(!anch){anch=true;ax=x;ay=y;}}}};
+  ring('tree',4,6,4);ring('tree',5,8,3);ring('rock',5,8,3);ring('spring',4,7,1);
+  for(let i=0;i<W*H;i++)if(!land[i]&&depth[i]===1&&!nodeAt[i]&&Math.hypot(ix(i)-tc[0],iy(i)-tc[1])<9&&rnd()<.45)addNode('fish',i);
+
+  res={food:200,water:100,stone:120,bbd:60};age=1;time=0;nextHurr=300;hurrWarned=false;nextDrought=210;droughtUntil=-1;nextPest=130;
+  rivalBBD=0;stormFx=0;sel=null;menu=null;buildMode=null;ended=false;stats={food:0};
+  for(let k=0;k<4;k++){const s=spawnTile(TC);if(s>=0)spawnWorker(s);}
+  buildTerrain();buildOwn();
+  resize();
+  z=Math.max(.9,Math.min(1.5,VW/(13*T)));
+  cam.x=(tc[0]+1)*T-VW/z/2;cam.y=(tc[1]+1)*T-VH/z/2;clampCam();
+  lastPanel='';
+}
+function farFrom(i,s,r){return Math.hypot(ix(i)-(s[0]+.5),iy(i)-(s[1]+.5))>r;}
+function findSpot(p){const c=p.tiles.slice().sort((a,b)=>((ix(a)-p.lx)**2+(iy(a)-p.ly)**2)-((ix(b)-p.lx)**2+(iy(b)-p.ly)**2));
+  for(const i of c){const x=ix(i),y=iy(i);let ok=true;for(let dy=0;dy<2&&ok;dy++)for(let dx=0;dx<2;dx++){if(!inB(x+dx,y+dy)){ok=false;break;}const j=(y+dy)*W+x+dx;if(!land[j]||coast[j]||urban[j]||pid[j]!==p.id){ok=false;break;}}if(ok)return[x,y];}
+  return[ix(c[0]),iy(c[0])];}
+function addNode(type,i){const n={type,i,x:ix(i),y:iy(i),amt:NT[type].max,max:NT[type].max};nodes.push(n);nodeAt[i]=n;return n;}
+function removeNode(n){n.amt=0;if(nodeAt[n.i]===n)nodeAt[n.i]=null;}
+function addBuilding(type,x,y,owner,done){const d=BT[type];const b={id:++BID,type,x,y,w:d.w||1,h:d.h||1,owner,done,progress:done?1:0,hp:d.hp,maxHp:d.hp,queue:0,trainT:0,pest:0,worker:null,dead:false,col:HOUSE_COL[BID%HOUSE_COL.length]};
+  for(let dy=0;dy<b.h;dy++)for(let dx=0;dx<b.w;dx++)bAt[(y+dy)*W+x+dx]=b;buildings.push(b);return b;}
+function removeBuilding(b){if(b.dead)return;b.dead=true;for(let dy=0;dy<b.h;dy++)for(let dx=0;dx<b.w;dx++){const i=(b.y+dy)*W+b.x+dx;if(bAt[i]===b)bAt[i]=null;}
+  buildings=buildings.filter(o=>o!==b);workers.forEach(w=>{if(w.task&&w.task.b===b)setIdle(w);if(w.dropB===b)w.path=null;});if(sel&&sel.b===b)sel=null;}
+function spawnTile(b){const g=adjRect(b.x,b.y,b.w,b.h);const cand=[];for(let y=b.y-1;y<=b.y+b.h;y++)for(let x=b.x-1;x<=b.x+b.w;x++){if(!inB(x,y))continue;const i=y*W+x;if(passable(i)&&g(i))cand.push(i);}
+  if(!cand.length)return -1;return cand[Math.floor(Math.random()*cand.length)];}
+function spawnWorker(i){const w={id:++WID,x:ix(i)+.5,y:iy(i)+.5,path:null,goal:null,task:null,phase:null,carry:null,amt:0,anim:Math.random()*6,working:false,dropB:null};workers.push(w);return w;}
+
+// ---------- pathfinding (BFS on the tile grid, no corner cutting)
+const prevBuf=new Int32Array(W*H),qBuf=new Int32Array(W*H),seen=new Int32Array(W*H);let stamp=0;
+function findPath(start,goal){
+  if(goal(start))return[];
+  stamp++;let h=0,t=0;qBuf[t++]=start;seen[start]=stamp;prevBuf[start]=-1;
+  while(h<t){const c=qBuf[h++],cx=ix(c),cy=iy(c);
+    for(const[dx,dy]of DIRS){const nx=cx+dx,ny=cy+dy;if(!inB(nx,ny))continue;const n=ny*W+nx;if(seen[n]===stamp||!passable(n))continue;
+      if(dx&&dy&&(!passable(cy*W+nx)||!passable(ny*W+cx)))continue;
+      seen[n]=stamp;prevBuf[n]=c;
+      if(goal(n)){const p=[];let k=n;while(k!==start){p.push(k);k=prevBuf[k];}return p.reverse();}
+      qBuf[t++]=n;}}
+  return null;}
+function adjRect(x0,y0,ww,hh){return i=>{const x=ix(i),y=iy(i);const dx=x<x0?x0-x:x>x0+ww-1?x-(x0+ww-1):0;const dy=y<y0?y0-y:y>y0+hh-1?y-(y0+hh-1):0;return dx<=1&&dy<=1&&(dx>0||dy>0);};}
+const tileOf=w=>(Math.floor(w.y))*W+Math.floor(w.x);
+function goTo(w,goal){w.goal=goal;w.path=findPath(tileOf(w),goal);return !!w.path;}
+function follow(w,dt){
+  if(!w.path)return'blocked';
+  if(!w.path.length)return'arrived';
+  const n=w.path[0];
+  if(!passable(n)){w.path=findPath(tileOf(w),w.goal);return w.path?'moving':'blocked';}
+  const tx=ix(n)+.5,ty=iy(n)+.5,dx=tx-w.x,dy=ty-w.y,d=Math.hypot(dx,dy),s=SPEED*dt;
+  if(d<=s){w.x=tx;w.y=ty;w.path.shift();}else{w.x+=dx/d*s;w.y+=dy/d*s;}
+  if(Math.abs(dx)>.01)w.face=Math.sign(dx);
+  return w.path.length?'moving':'arrived';}
+
+// ---------- worker tasks
+function release(w){if(w.task&&w.task.k==='farm'&&w.task.b.worker===w)w.task.b.worker=null;}
+function setIdle(w){release(w);w.task=null;w.path=null;w.goal=null;w.phase=null;}
+function assignMove(w,i){setIdle(w);w.task={k:'move'};const g=passable(i)?(j=>j===i):adjRect(ix(i),iy(i),1,1);if(!goTo(w,g))setIdle(w);}
+function assignGather(w,n){setIdle(w);w.task={k:'gather',n};w.phase='to';}
+function assignBuild(w,b){setIdle(w);w.task={k:'build',b};w.phase='to';}
+function assignFarm(w,b){if(b.worker&&b.worker!==w)setIdle(b.worker);setIdle(w);b.worker=w;w.task={k:'farm',b};w.phase='to';}
+function nearestNode(type,x,y,r){let best=null,bd=r*r;for(const n of nodes){if(n.type!==type||n.amt<=0)continue;const d=(n.x+.5-x)**2+(n.y+.5-y)**2;if(d<bd){bd=d;best=n;}}return best;}
+function nearestDrop(x,y){let best=null,bd=1e9;for(const b of buildings){if(b.owner!==1||!b.done||!BT[b.type].drop)continue;const d=(b.x+b.w/2-x)**2+(b.y+b.h/2-y)**2;if(d<bd){bd=d;best=b;}}return best;}
+
+function updWorker(w,dt){
+  const t=w.task;if(!t)return;
+  if(t.k==='move'){if(follow(w,dt)!=='moving')setIdle(w);return;}
+  if(t.k==='build'){
+    const b=t.b;if(b.dead){setIdle(w);return;}
+    if(b.done){if(b.type==='farm'&&!b.worker)assignFarm(w,b);else setIdle(w);return;}
+    if(w.phase==='to'){if(!w.path&&!goTo(w,adjRect(b.x,b.y,b.w,b.h))){setIdle(w);return;}const r=follow(w,dt);if(r==='arrived')w.phase='work';else if(r==='blocked')setIdle(w);return;}
+    w.working=true;b.progress+=dt/BT[b.type].build;if(b.progress>=1)complete(b);return;}
+  // gather or farm
+  let type,rate,rect;
+  if(t.k==='gather'){
+    if(t.n.amt<=0&&w.phase!=='drop'){const alt=nearestNode(t.n.type,w.x,w.y,15);
+      if(alt){t.n=alt;if(w.phase==='work'){w.phase='to';w.path=null;}}
+      else if(w.amt>0){w.phase='drop';w.path=null;}else{setIdle(w);return;}}
+    const n=t.n;type=NT[n.type].res;rate=NT[n.type].rate*(n.type==='spring'&&drought()?.5:1);rect=[n.x,n.y,1,1];
+  }else{const b=t.b;if(b.dead||!b.done){setIdle(w);return;}type='food';rate=.85*(b.pest>0?.35:1);rect=[b.x,b.y,1,1];}
+  if(w.phase==='to'){
+    if(!w.path&&!goTo(w,adjRect(...rect))){setIdle(w);return;}
+    const r=follow(w,dt);if(r==='arrived')w.phase='work';else if(r==='blocked')setIdle(w);return;}
+  if(w.phase==='work'){
+    if(w.carry!==type){w.carry=type;w.amt=0;}
+    let g=rate*dt;
+    if(t.k==='gather'){g=Math.min(g,t.n.amt);t.n.amt-=g;if(t.n.amt<=0)removeNode(t.n);}
+    else{const use=g*.25*(drought()?1.5:1);if(res.water<use)g*=.4;else res.water-=use;}
+    w.amt+=g;w.working=true;
+    if(w.amt>=CARRY||(t.k==='gather'&&t.n.amt<=0)){w.phase='drop';w.path=null;}
+    return;}
+  if(w.phase==='drop'){
+    if(!w.path){const d=nearestDrop(w.x,w.y);if(!d){setIdle(w);return;}w.dropB=d;if(!goTo(w,adjRect(d.x,d.y,d.w,d.h))){setIdle(w);return;}}
+    const r=follow(w,dt);
+    if(r==='arrived'){res[w.carry]+=w.amt;if(w.carry==='food')stats.food+=w.amt;w.amt=0;w.phase='to';w.path=null;}
+    else if(r==='blocked')w.path=null;
+  }
+}
+function complete(b){b.done=true;b.progress=1;b.hp=b.maxHp;toast(`${BT[b.type].name} built.`);}
+
+// ---------- economy, events, rival
+function popCap(){let c=0;buildings.forEach(b=>{if(b.owner===1&&b.done&&BT[b.type].pop)c+=BT[b.type].pop;});return Math.min(60,c);}
+function tcB(){return buildings.find(b=>b.type==='tc'&&b.owner===1);}
+function canAfford(c){return Object.keys(c).every(k=>res[k]>=c[k]);}
+function pay(c){Object.keys(c).forEach(k=>res[k]-=c[k]);}
+function fmtCost(c){const e=Object.entries(c);return e.length?e.map(([k,v])=>`${v} ${k==='bbd'?'BBD':k}`).join(' · '):'Free';}
+function claimCost(p){const n=owned(1)-1,m=p.owner===2?1.6:1;return{food:Math.round((120+50*n)*m),water:Math.round((40+20*n)*m),bbd:Math.round((40+25*n)*m)};}
+function rivalCost(){return 80+70*owned(2);}
+function canClaim(p){return p.owner!==1&&p.id!==HOME_R&&[...p.adj].some(a=>parishes[a].owner===1);}
+function parishBuilt(p){return buildings.some(b=>b.owner===1&&b.done&&pid[b.y*W+b.x]===p.id);}
+function setOwner(p,o){
+  if(p.owner===1&&o!==1)buildings.slice().forEach(b=>{if(b.owner===1&&!b.done&&pid[b.y*W+b.x]===p.id)removeBuilding(b);});
+  p.owner=o;buildOwn();}
+function protectedB(b){const cx=b.x+b.w/2,cy=b.y+b.h/2;return buildings.some(s=>s.type==='seawall'&&s.done&&Math.hypot(s.x+.5-cx,s.y+.5-cy)<=SEA_R);}
+function aquaPowered(b){return buildings.some(s=>s.type==='solar'&&s.done&&Math.hypot(s.x-b.x,s.y-b.y)<=SEA_R);}
+
+function landfall(){
+  const name=HNAMES[hurrIdx++%HNAMES.length];let lost=0,dmg=0;stormFx=5;
+  buildings.slice().forEach(b=>{
+    if(b.owner!==1)return;const prot=protectedB(b);
+    if(!b.done){if(!prot&&Math.random()<.5){removeBuilding(b);lost++;}return;}
+    if(b.type==='tc'){if(!prot){b.hp=Math.max(1,b.hp-b.maxHp*.3);dmg++;}return;}
+    if(b.type==='seawall'){b.hp-=b.maxHp*.15;}
+    else if(prot){if(Math.random()<.15){b.hp-=b.maxHp*.2;dmg++;}}
+    else if(Math.random()<.7){b.hp-=b.maxHp*(.5+Math.random()*.4);dmg++;}
+    if(b.hp<=0){removeBuilding(b);lost++;dmg--;}
+  });
+  nodes.forEach(n=>{if(n.type==='tree'&&n.amt>0&&Math.random()<.3)n.amt*=.5;});
+  rivalBBD*=.7;
+  toast(`Hurricane ${name} made landfall: ${lost} lost, ${Math.max(0,dmg)} damaged. AgroCorp lost 30% of its cash too.`,'bad');
+}
+function rivalTick(dt){
+  rivalBBD+=(1+.25*owned(2))*dt;
+  const cost=rivalCost();if(rivalBBD<cost)return;
+  const nearR=p=>[...p.adj].some(a=>parishes[a].owner===2);
+  let t=parishes.filter(p=>p.owner===0&&nearR(p));
+  let price=cost;
+  if(!t.length){t=parishes.filter(p=>p.owner===1&&p.id!==HOME_P&&nearR(p)&&!parishBuilt(p));price=cost*1.5;}
+  if(!t.length){t=parishes.filter(p=>p.owner===0);price=cost;}
+  if(!t.length||rivalBBD<price)return;
+  const p=t[Math.floor(Math.random()*t.length)];const was=p.owner;rivalBBD-=price;setOwner(p,2);
+  toast(was===1?`AgroCorp bought out ${p.name}. It had no buildings to hold it.`:`AgroCorp bought up ${p.name}.`,'bad');
+}
+function update(dt){
+  time+=dt;
+  workers.forEach(w=>{w.working=false;updWorker(w,dt);});
+  const tc=tcB();
+  if(tc&&tc.queue>0&&workers.length<popCap()){tc.trainT+=dt;if(tc.trainT>=TRAIN){const s=spawnTile(tc);if(s>=0){spawnWorker(s);tc.queue--;tc.trainT=0;}}}
+  if(ageT>=0){ageT+=dt;if(ageT>=AGE_T){ageT=-1;age=2;toast('Co-op Age reached. Aquaponics and solar unlocked.','good');checkEnd();}}
+  let water=0,food=0;
+  buildings.forEach(b=>{if(b.pest>0)b.pest-=dt;if(b.owner!==1||!b.done)return;
+    if(b.type==='cistern'&&!drought())water+=.5*dt;
+    if(b.type==='aqua'){const f=aquaPowered(b)?1:.5;const use=.5*f*dt;if(res.water>=use){res.water-=use;food+=2*f*dt;}else food+=.6*f*dt;}});
+  res.water+=water;res.food+=food;stats.food+=food;
+  res.bbd+=.4*owned(1)*dt;
+  if(!hurrWarned&&time>=nextHurr-60){hurrWarned=true;toast('Hurricane warning: landfall in 60s. Seawalls shield buildings within 5 tiles.','warn');}
+  if(time>=nextHurr){landfall();nextHurr+=240;hurrWarned=false;}
+  if(time>=nextDrought){droughtUntil=time+60;nextDrought=time+200+Math.random()*60;toast('Drought: cisterns are dry and springs run slow for 60s. Farms drink more.','warn');}
+  if(time>=nextPest){nextPest=time+80+Math.random()*60;const fs=buildings.filter(b=>b.type==='farm'&&b.done&&b.pest<=0);
+    if(fs.length){fs[Math.floor(Math.random()*fs.length)].pest=45;toast('Pests hit a farm plot. It grows at a third of its speed for 45s.','warn');}}
+  rivalTick(dt);
+  marks.forEach(m=>m.t-=dt);marks=marks.filter(m=>m.t>0);
+  if(stormFx>0)stormFx-=dt;
+  checkEnd();
+}
+function checkEnd(){if(ended)return;if(owned(1)>=WIN_N&&age>=2)endGame(true);else if(owned(2)>=WIN_N)endGame(false);}
+function fmtT(s){s=Math.max(0,Math.ceil(s));return`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;}
+function endGame(win){
+  ended=true;running=false;
+  $('#card').innerHTML=`<div class="flag"><i></i><i></i><i></i></div><div class="kicker">${fmtT(time)} played</div>
+  <h1>${win?'Food secure!':'Bought out'}</h1>
+  <p class="sub">${win?`Your co-op feeds ${owned(1)} parishes in the Co-op Age. Barbados eats what Barbados grows.`:`AgroCorp now controls ${owned(2)} parishes. Feed more parishes earlier and keep a building in each one.`}</p>
+  <ul><li><strong>${Math.floor(stats.food)}</strong> food grown and gathered</li><li><strong>${workers.length}</strong> workers, <strong>${buildings.filter(b=>b.owner===1&&b.done).length}</strong> buildings standing</li><li><strong>${hurrIdx}</strong> hurricanes weathered</li></ul>
+  <button class="btn primary" id="start">Play again</button>`;
+  $('#overlay').hidden=false;$('#start').onclick=startGame;
+}
+function startGame(){if(ended)newGame();$('#overlay').hidden=true;running=true;paused=false;last=performance.now();}
+
+// ---------- actions
+function selectedWorkers(){if(!sel||sel.kind!=='workers')return[];const ws=workers.filter(w=>sel.ids.has(w.id));return ws;}
+function placeReason(type,x,y){const d=BT[type];const w=d.w||1,h=d.h||1;
+  for(let dy=0;dy<h;dy++)for(let dx=0;dx<w;dx++){const tx=x+dx,ty=y+dy;if(!inB(tx,ty))return'That is out at sea.';const i=ty*W+tx;
+    if(!land[i])return'You can only build on land.';
+    if(parishes[pid[i]].owner!==1)return`${parishes[pid[i]].name} isn't yours yet. Build inside the gold parishes.`;
+    if(nodeAt[i]||bAt[i])return'That tile is taken.';
+    if(d.coast&&!coast[i])return'Seawalls go on coast tiles.';}
+  return null;}
+function place(tx,ty){
+  const type=buildMode,d=BT[type],r=placeReason(type,tx,ty);
+  if(r){toast(r);return;}
+  if(!canAfford(d.cost)){toast(`Not enough for a ${d.name}: needs ${fmtCost(d.cost)}.`);buildMode=null;return;}
+  pay(d.cost);const b=addBuilding(type,tx,ty,1,false);
+  let ws=selectedWorkers();
+  if(!ws.length){ws=workers.filter(w=>!w.task).sort((a,c)=>Math.hypot(a.x-tx,a.y-ty)-Math.hypot(c.x-tx,c.y-ty)).slice(0,2);
+    if(!ws.length){const o=workers.filter(w=>!(w.task&&w.task.k==='build')).sort((a,c)=>Math.hypot(a.x-tx,a.y-ty)-Math.hypot(c.x-tx,c.y-ty));ws=o.slice(0,1);}}
+  ws.forEach(w=>assignBuild(w,b));
+  marks.push({x:tx+.5,y:ty+.5,t:.7});
+  if(!ws.length)toast('No workers free. Select one and tap the foundation.');
+  buildMode=null;sel=ws.length?{kind:'workers',ids:new Set(ws.map(w=>w.id))}:{kind:'building',b};
+}
+function claim(p){const c=claimCost(p);if(!canClaim(p)||!canAfford(c))return;pay(c);setOwner(p,1);
+  toast(`${p.name} is fed by your co-op now. Put a building there so AgroCorp can't buy it out.`,'good');checkEnd();}
+function act(a){
+  const tc=tcB();
+  if(a==='build'){menu=menu==='build'?null:'build';buildMode=null;}
+  else if(a.startsWith('place:')){buildMode=a.slice(6);menu=null;}
+  else if(a==='cancel'){buildMode=null;menu=null;}
+  else if(a==='deselect'){sel=null;menu=null;buildMode=null;}
+  else if(a==='train'){if(tc&&res.food>=50&&tc.queue<5){res.food-=50;tc.queue++;}}
+  else if(a==='age'){if(age===1&&ageT<0&&canAfford(AGE_COST)){pay(AGE_COST);ageT=0;toast('Your co-op is organising. Co-op Age in 40s.');}}
+  else if(a==='sell-food'){if(res.food>=100){res.food-=100;res.bbd+=50;}}
+  else if(a==='sell-stone'){if(res.stone>=100){res.stone-=100;res.bbd+=40;}}
+  else if(a==='buy-water'){if(res.bbd>=50){res.bbd-=50;res.water+=100;}}
+  else if(a==='repair'&&sel&&sel.b){const b=sel.b,c=Math.ceil((b.maxHp-b.hp)*.25);if(res.stone>=c){res.stone-=c;b.hp=b.maxHp;}}
+  else if(a==='claim'&&sel&&sel.p)claim(sel.p);
+  renderPanel(true);
+}
+function tap(sx,sy){
+  const wx=sx/z+cam.x,wy=sy/z+cam.y,tx=Math.floor(wx/T),ty=Math.floor(wy/T);
+  if(buildMode){place(tx,ty);renderPanel(true);return;}
+  menu=null;
+  const rad=Math.max(.55,16/(z*T));let hit=null,hd=rad;
+  workers.forEach(w=>{const d=Math.hypot(w.x-wx/T,w.y-wy/T);if(d<hd){hd=d;hit=w;}});
+  if(hit){sel={kind:'workers',ids:new Set([hit.id])};renderPanel(true);return;}
+  if(!inB(tx,ty)){sel=null;renderPanel(true);return;}
+  const i=ty*W+tx,b=bAt[i],n=nodeAt[i];
+  const ws=selectedWorkers();
+  if(ws.length){
+    if(n){ws.forEach(w=>assignGather(w,n));marks.push({x:tx+.5,y:ty+.5,t:.6});renderPanel(true);return;}
+    if(b&&b.owner===1&&!b.done){ws.forEach(w=>assignBuild(w,b));marks.push({x:b.x+b.w/2,y:b.y+b.h/2,t:.6});renderPanel(true);return;}
+    if(b&&b.owner===1&&b.type==='farm'){
+      const farms=[b,...buildings.filter(f=>f!==b&&f.type==='farm'&&f.done&&!f.worker).sort((a,c)=>Math.hypot(a.x-b.x,a.y-b.y)-Math.hypot(c.x-b.x,c.y-b.y))];
+      ws.forEach((w,k)=>{if(farms[k])assignFarm(w,farms[k]);});marks.push({x:tx+.5,y:ty+.5,t:.6});renderPanel(true);return;}
+    if(b){sel=b.type==='hq'?{kind:'parish',p:parishes[HOME_R]}:{kind:'building',b};renderPanel(true);return;}
+    if(land[i]){ws.forEach(w=>assignMove(w,i));marks.push({x:tx+.5,y:ty+.5,t:.6});renderPanel(true);return;}
+    renderPanel(true);return;
+  }
+  if(b){sel=b.type==='hq'?{kind:'parish',p:parishes[HOME_R]}:{kind:'building',b};}
+  else if(n)sel={kind:'node',n};
+  else if(land[i])sel={kind:'parish',p:parishes[pid[i]]};
+  else sel=null;
+  renderPanel(true);
+}
+
+// ---------- panel
+function btn(a,label,sub,o={}){return`<button class="btn${o.primary?' primary':''}" data-act="${a}"${o.disabled?' disabled':''}>${label}${sub?`<small>${sub}</small>`:''}</button>`;}
+function wStatus(w){const t=w.task;let s='Idle';
+  if(t){if(t.k==='move')s='Walking';else if(t.k==='build')s=`Building ${BT[t.b.type].name}`;else if(t.k==='farm')s='Farming';
+    else if(t.k==='gather')s=`Gathering ${NT[t.n.type].label.toLowerCase()}`;
+    if(w.phase==='drop')s+=', heading to drop off';}
+  if(w.amt>=1)s+=`. Carrying ${Math.floor(w.amt)} ${w.carry}`;return s+'.';}
+function panelHTML(){
+  if(buildMode){const d=BT[buildMode];return`<h3>Place ${d.name}</h3><p>Tap ${d.coast?'a coast tile':'an empty tile'} inside your gold parishes. ${d.desc}</p><div class="btns">${btn('cancel','Cancel')}</div>`;}
+  if(menu==='build'){
+    return`<h3>Build</h3><p>Costs come out when you place it. Selected or idle workers go build it.</p><div class="grid2">${BUILD_LIST.map(k=>{const d=BT[k];const locked=(d.age||1)>age;
+      return btn('place:'+k,d.name,locked?'Co-op Age':fmtCost(d.cost),{disabled:locked||!canAfford(d.cost)});}).join('')}</div>`;}
+  if(!sel){return`<h3>Grow the island</h3><p>Goal: feed <strong>${WIN_N} parishes</strong> and reach the <strong>Co-op Age</strong>. Tap a worker, then tap breadfruit, coral stone, a spring or fish. Tap any parish to see it.</p>`;}
+  if(sel.kind==='workers'){const ws=selectedWorkers();if(!ws.length){sel=null;return panelHTML();}
+    const head=ws.length===1?'Worker':`${ws.length} workers`;
+    const body=ws.length===1?wStatus(ws[0]):`${ws.filter(w=>!w.task).length} idle.`;
+    return`<h3>${head}</h3><p>${body} Tap a resource to gather, a farm to work it, a foundation to build it, or land to walk there.</p><div class="btns">${btn('build','Build…')}${btn('deselect','Deselect')}</div>`;}
+  if(sel.kind==='node'){const n=sel.n;if(n.amt<=0){sel=null;return panelHTML();}const d=NT[n.type];
+    return`<h3>${d.label}</h3><p>${d.max===Infinity?'Never runs dry, but slows in a drought.':`${Math.ceil(n.amt)} ${d.res} left.`} Select a worker first, then tap here to gather ${d.res}.</p><div class="btns">${btn('deselect','Close')}</div>`;}
+  if(sel.kind==='building'){const b=sel.b;if(b.dead){sel=null;return panelHTML();}const d=BT[b.type];
+    let html=`<h3>${d.name}</h3>`;
+    if(!b.done){return html+`<p>Under construction: ${Math.floor(b.progress*100)}%. Select workers and tap it to help build.</p><div class="btns">${btn('deselect','Close')}</div>`;}
+    let info=d.desc,btns='';
+    if(b.type==='tc'){
+      info=`Trains workers. ${b.queue?`Training ${b.queue} (next in ${Math.ceil(TRAIN-b.trainT)}s${workers.length>=popCap()?', needs a house':''}).`:''}`;
+      btns+=btn('train','Train worker','50 food',{primary:true,disabled:res.food<50||b.queue>=5});
+      if(age===1)btns+=ageT>=0?btn('noop','Advancing…',`${Math.ceil(AGE_T-ageT)}s left`,{disabled:true}):btn('age','Co-op Age',fmtCost(AGE_COST),{disabled:!canAfford(AGE_COST)});}
+    if(b.type==='market'){btns+=btn('sell-food','Sell 100 food','+50 BBD',{disabled:res.food<100})+btn('sell-stone','Sell 100 stone','+40 BBD',{disabled:res.stone<100})+btn('buy-water','Truck in 100 water','50 BBD',{disabled:res.bbd<50});}
+    if(b.type==='farm'){info=`${b.worker?'Being farmed.':'No farmer. Select a worker and tap this plot.'}${b.pest>0?` Pests: ${Math.ceil(b.pest)}s left.`:''}${res.water<1?' Out of water, so growth is slow.':''}`;}
+    if(b.type==='aqua')info=aquaPowered(b)?'Powered by solar. +2 food/s.':'No solar array within 5 tiles, so it runs at half speed.';
+    if(b.hp<b.maxHp){const c=Math.ceil((b.maxHp-b.hp)*.25);btns+=btn('repair','Repair',`${c} stone`,{disabled:res.stone<c});}
+    const hp=`Condition ${Math.round(b.hp/b.maxHp*100)}%.${b.type!=='seawall'&&b.type!=='tc'?(protectedB(b)?' Shielded by a seawall.':' Not shielded from hurricanes.'):''}`;
+    return html+`<p>${info} ${hp}</p><div class="btns">${btns}${btn('deselect','Close')}</div>`;}
+  if(sel.kind==='parish'){const p=sel.p;
+    const tag=p.owner===1?'<span class="tag t-you">Your co-op</span>':p.owner===2?'<span class="tag t-rival">AgroCorp</span>':'<span class="tag t-free">Unclaimed</span>';
+    let body='',b2='';
+    if(p.owner===1){body=p.id===HOME_P?'Your home parish.':parishBuilt(p)?'Protected by your buildings.':'<strong>No buildings yet.</strong> AgroCorp can buy it out.';body+=' Pays 0.4 BBD/s in co-op dues.';}
+    else if(p.id===HOME_R)body='AgroCorp headquarters. It can\'t be won over.';
+    else{const c=claimCost(p);
+      if(canClaim(p)){body=p.owner===2?'AgroCorp owns it, but locals will switch if you feed them well.':'Hungry and next to your land.';b2=btn('claim',p.owner===2?'Win it back':'Feed this parish',fmtCost(c),{primary:true,disabled:!canAfford(c)});}
+      else body='Not next to your parishes yet. Feed the parishes in between first.';}
+    return`<h3>${p.name}</h3><p>${tag} ${body}</p><div class="btns">${b2}${btn('deselect','Close')}</div>`;}
+  return'';
+}
+let lastPanel='',panelT=0;
+const panelEl=$('#panel');
+function renderPanel(force){const h=panelHTML();if(force||h!==lastPanel){if(h!==lastPanel){panelEl.innerHTML=h;lastPanel=h;}}}
+panelEl.addEventListener('pointerdown',e=>{const b=e.target.closest('button');if(!b||b.disabled)return;e.preventDefault();act(b.dataset.act);});
+panelEl.addEventListener('click',e=>{if(e.detail!==0)return;const b=e.target.closest('button');if(b&&!b.disabled)act(b.dataset.act);});
+$('#b-build').onclick=()=>{if(!running)return;act('build');};
+$('#b-all').onclick=()=>{if(!running)return;sel={kind:'workers',ids:new Set(workers.map(w=>w.id))};menu=null;buildMode=null;renderPanel(true);};
+$('#b-idle').onclick=()=>{if(!running)return;const idle=workers.filter(w=>!w.task);if(!idle.length){toast('Everyone is busy.');return;}
+  const w=idle[idleIdx++%idle.length];sel={kind:'workers',ids:new Set([w.id])};menu=null;buildMode=null;cam.x=w.x*T-VW/z/2;cam.y=w.y*T-VH/z/2;clampCam();renderPanel(true);};
+$('#b-pause').onclick=()=>{if(!running)return;paused=!paused;$('#b-pause').textContent=paused?'Resume':'Pause';$('#b-pause').classList.toggle('on',paused);};
+
+// ---------- toasts & HUD
+function toast(msg,kind){const box=$('#toasts');const el=document.createElement('div');el.className='toast'+(kind?' '+kind:'');el.textContent=msg;box.appendChild(el);
+  while(box.children.length>3)box.firstChild.remove();setTimeout(()=>{el.classList.add('out');setTimeout(()=>el.remove(),320);},4500);}
+const hudCache={};
+function setT(id,v){if(hudCache[id]!==v){hudCache[id]=v;document.getElementById(id).textContent=v;}}
+function hud(){
+  setT('r-food',String(Math.floor(res.food)));setT('r-water',String(Math.floor(res.water)));setT('r-stone',String(Math.floor(res.stone)));setT('r-bbd',String(Math.floor(res.bbd)));
+  setT('r-pop',`${workers.length}/${popCap()}`);
+  setT('s-age',age===1?(ageT>=0?`Co-op Age in ${Math.ceil(AGE_T-ageT)}s`:'Village Age'):'Co-op Age');
+  const left=nextHurr-time;setT('s-hurr',stormFx>0?'Hurricane!':`Hurricane ${fmtT(left)}`);
+  $('#s-hurr').classList.toggle('warn',left<60||stormFx>0);
+  const dr=drought();$('#s-dry').hidden=!dr;if(dr)setT('s-dry',`Drought ${fmtT(droughtUntil-time)}`);
+  setT('s-par',`You ${owned(1)}/${WIN_N} · AgroCorp ${owned(2)}/${WIN_N}`);
+  $('#s-rival').style.width=Math.min(100,rivalBBD/rivalCost()*100)+'%';
+}
+
+// ---------- rendering
+function polyPath(g,a,s){g.moveTo(a[0]*s,a[1]*s);for(let k=2;k<a.length;k+=2)g.lineTo(a[k]*s,a[k+1]*s);g.closePath();}
+function islandPath(g,s){g.beginPath();parishes.forEach(p=>polyPath(g,p.poly,s));}
+function rockPath(g,s){
+  const[ax,ay]=ROCK_A,[bx,by]=ROCK_B;let dx=bx-ax,dy=by-ay;const L=Math.hypot(dx,dy);dx/=L;dy/=L;const nx=-dy,ny=dx; // normal pointing east
+  const e=nx>0?1:-1,F=200;
+  g.beginPath();g.moveTo((ax-dx*F)*s,(ay-dy*F)*s);g.lineTo((ax-dx*F+nx*e*F)*s,(ay-dy*F+ny*e*F)*s);g.lineTo((bx+dx*F+nx*e*F)*s,(by+dy*F+ny*e*F)*s);g.lineTo((bx+dx*F)*s,(by+dy*F)*s);g.closePath();
+  g.rect(-50*s,-50*s,(W+100)*s,(ROCK_N+50)*s);}
+function calmClip(g,s){g.beginPath();g.rect(-50*s,-50*s,(W+100)*s,(H+100)*s);
+  // everything except the rocky side, via evenodd
+  const[ax,ay]=ROCK_A,[bx,by]=ROCK_B;let dx=bx-ax,dy=by-ay;const L=Math.hypot(dx,dy);dx/=L;dy/=L;const nx=-dy,ny=dx,e=nx>0?1:-1,F=200;
+  g.moveTo((ax-dx*F)*s,(ay-dy*F)*s);g.lineTo((ax-dx*F+nx*e*F)*s,(ay-dy*F+ny*e*F)*s);g.lineTo((bx+dx*F+nx*e*F)*s,(by+dy*F+ny*e*F)*s);g.lineTo((bx+dx*F)*s,(by+dy*F)*s);g.closePath();
+  g.clip('evenodd');g.beginPath();g.rect(-50*s,-50*s,(W+100)*s,(H+100)*s);g.rect(-50*s,-50*s,(W+100)*s,(ROCK_N+50)*s);g.clip('evenodd');}
+function smoothLine(g,pts,s){g.beginPath();g.moveTo(pts[0][0]*s,pts[0][1]*s);
+  for(let k=1;k<pts.length-1;k++){const mx=(pts[k][0]+pts[k+1][0])/2,my=(pts[k][1]+pts[k+1][1])/2;g.quadraticCurveTo(pts[k][0]*s,pts[k][1]*s,mx*s,my*s);}
+  const l=pts[pts.length-1];g.lineTo(l[0]*s,l[1]*s);}
+function buildTerrain(){
+  TS=(window.devicePixelRatio||1)>=1.5?2:1.25;
+  const S=T*TS;
+  terrC=document.createElement('canvas');terrC.width=Math.round(W*S);terrC.height=Math.round(H*S);const g=terrC.getContext('2d');
+  g.lineJoin='round';g.lineCap='round';
+  let sd=77;const r=()=>{sd=(sd*16807)%2147483647;return(sd-1)/2147483646;};
+  // sea: smooth depth gradient
+  const sc=document.createElement('canvas');sc.width=W;sc.height=H;const sg=sc.getContext('2d');const sid=sg.createImageData(W,H);
+  const shal=[64,196,212],deep=[10,52,120];
+  for(let i=0;i<W*H;i++){const bd=Math.min(ix(i),iy(i),W-1-ix(i),H-1-iy(i));const t=land[i]?0:Math.max(Math.min(1,(depth[i]-.5)/6.5),1-bd/3);for(let k=0;k<3;k++)sid.data[i*4+k]=Math.round(shal[k]+(deep[k]-shal[k])*Math.pow(t,.8));sid.data[i*4+3]=255;}
+  sg.putImageData(sid,0,0);g.imageSmoothingEnabled=true;g.imageSmoothingQuality='high';g.drawImage(sc,0,0,terrC.width,terrC.height);
+  // swell lines out at sea
+  g.strokeStyle='rgba(255,255,255,.10)';g.lineWidth=1.2*TS;
+  for(let k=0;k<160;k++){const x=r()*W,y=r()*H,i=Math.floor(y)*W+Math.floor(x);if(land[i]||depth[i]<3)continue;g.beginPath();g.arc(x*S,y*S,.35*S,Math.PI*1.15,Math.PI*1.85);g.stroke();}
+  // shallow shelf
+  islandPath(g,S);g.strokeStyle='rgba(120,226,228,.28)';g.lineWidth=2.8*S;g.stroke();g.strokeStyle='rgba(150,236,230,.38)';g.lineWidth=1.5*S;g.stroke();
+  // calm Caribbean side: fringing reef + sand
+  g.save();calmClip(g,S);islandPath(g,S);
+  g.setLineDash([.12*S,.22*S]);g.strokeStyle='rgba(210,250,240,.5)';g.lineWidth=1.9*S;g.stroke();g.setLineDash([]);
+  g.strokeStyle='#F0DDA6';g.lineWidth=.7*S;g.stroke();g.restore();
+  // Atlantic side: surf + rock
+  g.save();rockPath(g,S);g.clip();islandPath(g,S);
+  g.strokeStyle='rgba(255,255,255,.28)';g.lineWidth=1.3*S;g.stroke();g.setLineDash([.25*S,.18*S]);g.strokeStyle='rgba(255,255,255,.55)';g.lineWidth=.85*S;g.stroke();g.setLineDash([]);
+  g.strokeStyle='#8B806C';g.lineWidth=.55*S;g.stroke();g.restore();
+  // land: elevation colour + hillshade, rendered small then smoothed into the island shape
+  const R=8,cw=W*R,ch=H*R,lc=document.createElement('canvas');lc.width=cw;lc.height=ch;const lg=lc.getContext('2d');const id=lg.createImageData(cw,ch);
+  const low=[160,198,96],mid=[100,160,74],high=[58,118,58],clay=[150,132,86];
+  for(let y=0;y<ch;y++)for(let x=0;x<cw;x++){const tx=(x+.5)/R,ty=(y+.5)/R;const e=heightAt(tx,ty);
+    const sh=(heightAt(tx-.5,ty-.5)-heightAt(tx+.5,ty+.5))*2.6;
+    const t=Math.min(1,e/.95);let c=t<.45?low.map((v,k)=>v+(mid[k]-v)*(t/.45)):mid.map((v,k)=>v+(high[k]-v)*((t-.45)/.55));
+    const sw=scotAt(tx,ty)*.6*(.7+.3*Math.sin(tx*2.1)*Math.cos(ty*1.7));c=c.map((v,k)=>v+(clay[k]-v)*sw);
+    const f=Math.max(.72,Math.min(1.22,1+sh))*(.97+Math.random()*.06);const o=(y*cw+x)*4;
+    id.data[o]=Math.min(255,c[0]*f);id.data[o+1]=Math.min(255,c[1]*f);id.data[o+2]=Math.min(255,c[2]*f);id.data[o+3]=255;}
+  lg.putImageData(id,0,0);
+  g.save();islandPath(g,S);g.clip();g.drawImage(lc,0,0,terrC.width,terrC.height);
+  // field patchwork in the lowlands
+  for(let k=0;k<340;k++){const x=r()*W,y=r()*H,i=Math.floor(y)*W+Math.floor(x);if(!land[i]||urban[i]||elev[i]>.55||scot[i]>.3)continue;
+    g.save();g.translate(x*S,y*S);g.rotate(-.35+r()*.7);const w=(.5+r()*1.1)*S,h=(.35+r()*.7)*S;
+    g.fillStyle=['rgba(52,104,40,.16)','rgba(200,214,112,.18)','rgba(124,152,60,.15)','rgba(90,130,50,.12)'][Math.floor(r()*4)];g.fillRect(-w/2,-h/2,w,h);g.restore();}
+  // gullies: darker wooded cuts through the coral cap
+  g.strokeStyle='rgba(30,70,32,.35)';g.lineWidth=.22*S;
+  [[13.172,-59.596,13.150,-59.620],[13.140,-59.575,13.112,-59.600],[13.215,-59.600,13.205,-59.630]].forEach(([a,b,c,d])=>{const p0=toT(a,b),p1=toT(c,d);g.beginPath();g.moveTo(p0[0]*S,p0[1]*S);
+    g.bezierCurveTo((p0[0]*.6+p1[0]*.4+.6)*S,(p0[1]*.6+p1[1]*.4)*S,(p0[0]*.3+p1[0]*.7-.6)*S,(p0[1]*.3+p1[1]*.7)*S,p1[0]*S,p1[1]*S);g.stroke();});
+  // roads
+  ROADS.forEach(rt=>{smoothLine(g,rt,S);g.strokeStyle='rgba(60,48,28,.28)';g.lineWidth=.34*S;g.stroke();g.strokeStyle='rgba(250,240,214,.8)';g.lineWidth=.17*S;g.stroke();});
+  // airport runway
+  g.strokeStyle='#5E636B';g.lineWidth=.5*S;g.lineCap='butt';g.beginPath();g.moveTo(RUNWAY[0][0]*S,RUNWAY[0][1]*S);g.lineTo(RUNWAY[1][0]*S,RUNWAY[1][1]*S);g.stroke();
+  g.strokeStyle='rgba(255,255,255,.8)';g.lineWidth=.06*S;g.setLineDash([.25*S,.2*S]);g.stroke();g.setLineDash([]);g.lineCap='round';
+  // towns: clusters of chattel-house roofs
+  const roofs=['#E58C7A','#F4F1E8','#7FB7D9','#F2C66D','#D9796B','#B9D7A8'];
+  TOWNS.forEach(t=>{const n=t.s*t.s*6+6,rad=t.s*.62+.35;for(let k=0;k<n;k++){const a=r()*Math.PI*2,d=Math.sqrt(r())*rad,x=t.x+Math.cos(a)*d,y=t.y+Math.sin(a)*d;
+    if(!inPolyF(x,y,parishes[pid[Math.floor(y)*W+Math.floor(x)]]?.poly||[]))continue;
+    const w=(.16+r()*.1)*S;g.fillStyle='rgba(0,0,0,.2)';g.fillRect(x*S-w/2+.04*S,y*S-w/2+.05*S,w,w*.8);g.fillStyle=roofs[Math.floor(r()*roofs.length)];g.fillRect(x*S-w/2,y*S-w/2,w,w*.8);}});
+  // speckle texture
+  for(let k=0;k<9000;k++){const x=r()*W,y=r()*H;g.fillStyle=r()<.5?'rgba(255,255,255,.06)':'rgba(0,0,0,.07)';g.fillRect(x*S,y*S,1.5*TS,1.5*TS);}
+  g.restore();
+  // parish borders: only edges with land on both sides
+  g.strokeStyle='rgba(20,38,22,.5)';g.lineWidth=1.4*TS;g.setLineDash([3.5*TS,3*TS]);g.beginPath();
+  const onLand=(x,y)=>parishes.some(p=>inPolyF(x,y,p.poly));
+  parishes.forEach(p=>{const a=p.poly;for(let k=0;k<a.length;k+=2){const x0=a[k],y0=a[k+1],x1=a[(k+2)%a.length],y1=a[(k+3)%a.length];
+    const mx=(x0+x1)/2,my=(y0+y1)/2,L=Math.hypot(x1-x0,y1-y0)||1,nx=-(y1-y0)/L*.25,ny=(x1-x0)/L*.25;
+    if(onLand(mx+nx,my+ny)&&onLand(mx-nx,my-ny)){g.moveTo(x0*S,y0*S);g.lineTo(x1*S,y1*S);}}});
+  g.stroke();g.setLineDash([]);
+}
+function buildOwn(){
+  const S=T*TS;
+  if(!ownC){ownC=document.createElement('canvas');}
+  ownC.width=Math.round(W*S);ownC.height=Math.round(H*S);
+  const g=ownC.getContext('2d');g.clearRect(0,0,ownC.width,ownC.height);g.lineJoin='round';
+  parishes.forEach(p=>{if(!p.owner)return;g.beginPath();polyPath(g,p.poly,S);
+    g.fillStyle=p.owner===1?'rgba(255,199,38,.22)':'rgba(226,85,63,.26)';g.fill();
+    g.strokeStyle=p.owner===1?'rgba(255,205,60,.95)':'rgba(240,96,72,.95)';g.lineWidth=2.4*TS;g.stroke();});
+}
+function bar(x,y,w,f,col){ctx.fillStyle='rgba(0,0,0,.55)';ctx.fillRect(x+2,y,w-4,4);ctx.fillStyle=col;ctx.fillRect(x+2,y,(w-4)*Math.max(0,Math.min(1,f)),4);}
+function drawNode(n){
+  const x=n.x*T,y=n.y*T,sc=n.max===Infinity?1:.65+.35*(n.amt/n.max);
+  if(n.type==='tree'){ctx.fillStyle='rgba(0,0,0,.18)';ctx.beginPath();ctx.ellipse(x+12,y+20,8*sc,3,0,0,7);ctx.fill();
+    ctx.fillStyle='#6B4A2B';ctx.fillRect(x+10.5,y+12,3,8);
+    ctx.fillStyle='#246B2B';ctx.beginPath();ctx.arc(x+12,y+10,8*sc,0,7);ctx.fill();
+    ctx.fillStyle='#3E9A3E';ctx.beginPath();ctx.arc(x+10,y+8,5*sc,0,7);ctx.fill();
+    ctx.fillStyle='#C3DD5E';[[15,11],[9,12],[13,6]].forEach(([a,b])=>{ctx.beginPath();ctx.arc(x+a,y+b,1.8*sc,0,7);ctx.fill();});}
+  else if(n.type==='rock'){ctx.fillStyle='rgba(0,0,0,.2)';ctx.beginPath();ctx.ellipse(x+12,y+19,9*sc,3,0,0,7);ctx.fill();
+    ctx.fillStyle='#E7E0CC';ctx.beginPath();ctx.moveTo(x+12-9*sc,y+18);ctx.lineTo(x+12-6*sc,y+18-9*sc);ctx.lineTo(x+12+2*sc,y+18-11*sc);ctx.lineTo(x+12+9*sc,y+18-5*sc);ctx.lineTo(x+12+8*sc,y+18);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#B4A98F';ctx.beginPath();ctx.moveTo(x+12+2*sc,y+18-11*sc);ctx.lineTo(x+12+9*sc,y+18-5*sc);ctx.lineTo(x+12+8*sc,y+18);ctx.lineTo(x+12+1*sc,y+18);ctx.closePath();ctx.fill();
+    ctx.fillStyle='rgba(120,110,90,.6)';ctx.fillRect(x+9,y+12,1.6,1.6);ctx.fillRect(x+13,y+14,1.6,1.6);}
+  else if(n.type==='spring'){ctx.fillStyle='#2E8FC4';ctx.beginPath();ctx.ellipse(x+12,y+13,9,7,0,0,7);ctx.fill();
+    ctx.fillStyle='#7FD3F5';ctx.beginPath();ctx.ellipse(x+12,y+12,6,4.5,0,0,7);ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,.8)';ctx.lineWidth=1;const p=(time*.8)%1;ctx.beginPath();ctx.ellipse(x+12,y+12,2+4*p,1.5+3*p,0,0,7);ctx.stroke();}
+  else if(n.type==='fish'){const bob=Math.sin(time*2+n.i)*1.5;
+    ctx.strokeStyle='rgba(255,255,255,.25)';ctx.lineWidth=1;ctx.beginPath();ctx.ellipse(x+12,y+14,9,3,0,0,7);ctx.stroke();
+    ctx.fillStyle='#D8F6FF';ctx.beginPath();ctx.ellipse(x+11,y+11+bob,5,2.2,0,0,7);ctx.fill();
+    ctx.beginPath();ctx.moveTo(x+15,y+11+bob);ctx.lineTo(x+19,y+8+bob);ctx.lineTo(x+19,y+14+bob);ctx.closePath();ctx.fill();
+    ctx.fillStyle='rgba(216,246,255,.55)';ctx.beginPath();ctx.moveTo(x+10,y+10+bob);ctx.lineTo(x+13,y+5+bob);ctx.lineTo(x+14,y+10+bob);ctx.fill();}
+}
+function drawBuilding(b){
+  const x=b.x*T,y=b.y*T,w=b.w*T,h=b.h*T;
+  ctx.fillStyle='rgba(0,0,0,.22)';ctx.fillRect(x+3,y+h-5,w-4,4);
+  if(!b.done){ctx.fillStyle='rgba(255,255,255,.16)';ctx.fillRect(x+2,y+2,w-4,h-4);ctx.setLineDash([4,3]);ctx.strokeStyle='#FFC726';ctx.lineWidth=1.5;ctx.strokeRect(x+2.5,y+2.5,w-5,h-5);ctx.setLineDash([]);
+    ctx.globalAlpha=.45;drawShape(b,x,y,w,h);ctx.globalAlpha=1;bar(x,y+h-5,w,b.progress,'#FFC726');return;}
+  drawShape(b,x,y,w,h);
+  if(b.pest>0){ctx.fillStyle='#2A1A10';for(let k=0;k<6;k++){const a=k*1.7+time*3;ctx.beginPath();ctx.arc(x+12+Math.cos(a)*7,y+12+Math.sin(a*1.3)*7,1.4,0,7);ctx.fill();}}
+  if(b.hp<b.maxHp)bar(x,y-5,w,b.hp/b.maxHp,b.hp/b.maxHp>.5?'#6CC24A':b.hp/b.maxHp>.25?'#FFB03A':'#E2553F');
+}
+function drawShape(b,x,y,w,h){
+  switch(b.type){
+  case'tc':ctx.fillStyle='#EFE3C8';ctx.fillRect(x+5,y+16,w-10,h-20);ctx.fillStyle='#D7C7A2';ctx.fillRect(x+5,y+h-8,w-10,4);
+    ctx.fillStyle='#B5452F';ctx.beginPath();ctx.moveTo(x+2,y+18);ctx.lineTo(x+w/2,y+5);ctx.lineTo(x+w-2,y+18);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#5A3A22';ctx.fillRect(x+w/2-4,y+h-17,8,13);ctx.fillStyle='#2E6FB8';ctx.fillRect(x+10,y+22,6,6);ctx.fillRect(x+w-16,y+22,6,6);
+    ctx.fillStyle='#3A2A1A';ctx.fillRect(x+w-9,y+1,1.6,16);ctx.fillStyle='#00267F';ctx.fillRect(x+w-7.4,y+1,3,6);ctx.fillStyle='#FFC726';ctx.fillRect(x+w-4.4,y+1,3,6);ctx.fillStyle='#00267F';ctx.fillRect(x+w-1.4,y+1,1.4,6);break;
+  case'hq':ctx.fillStyle='#2B2F3A';ctx.fillRect(x+6,y+4,w-12,h-8);ctx.fillStyle='#3A4050';ctx.fillRect(x+6,y+4,6,h-8);
+    ctx.fillStyle='#E2553F';ctx.fillRect(x+6,y+12,w-12,4);ctx.fillStyle='#9AA3B5';for(let r=0;r<3;r++)for(let c=0;c<3;c++)ctx.fillRect(x+15+c*7,y+20+r*7,4,4);break;
+  case'house':ctx.fillStyle=b.col;ctx.fillRect(x+5,y+11,14,10);ctx.fillStyle='#7A3B2E';ctx.beginPath();ctx.moveTo(x+3,y+12);ctx.lineTo(x+12,y+3);ctx.lineTo(x+21,y+12);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#FFFFFF';ctx.fillRect(x+5,y+11,14,1.5);ctx.fillStyle='#5A3A22';ctx.fillRect(x+10,y+15,4,6);ctx.fillStyle='#FFF7E0';ctx.fillRect(x+15.5,y+14,2.5,2.5);ctx.fillRect(x+6,y+14,2.5,2.5);break;
+  case'farm':ctx.fillStyle='#7A5230';ctx.fillRect(x+1.5,y+1.5,21,21);ctx.fillStyle='#5C3C22';for(let r=0;r<4;r++)ctx.fillRect(x+3,y+4+r*5,18,1.5);
+    ctx.fillStyle=b.pest>0?'#9AA24A':'#6CC24A';for(let r=0;r<4;r++)for(let c=0;c<5;c++){ctx.beginPath();ctx.arc(x+4.5+c*3.8,y+3.5+r*5,1.6,0,7);ctx.fill();}break;
+  case'depot':ctx.fillStyle='#9C6B3C';ctx.fillRect(x+3,y+7,18,14);ctx.strokeStyle='#6E4723';ctx.lineWidth=1;for(let k=0;k<3;k++){ctx.beginPath();ctx.moveTo(x+3,y+11+k*4);ctx.lineTo(x+21,y+11+k*4);ctx.stroke();}
+    ctx.fillStyle='#C99A5B';ctx.fillRect(x+2,y+4,20,4);ctx.fillStyle='#E8C27A';ctx.fillRect(x+14,y+14,6,6);ctx.strokeStyle='#8A5A2E';ctx.strokeRect(x+14,y+14,6,6);break;
+  case'cistern':ctx.fillStyle='#9AA3AB';ctx.beginPath();ctx.ellipse(x+12,y+15,9,7,0,0,7);ctx.fill();ctx.fillStyle='#B8C0C7';ctx.fillRect(x+3,y+9,18,6);
+    ctx.fillStyle='#C9D0D6';ctx.beginPath();ctx.ellipse(x+12,y+9,9,4,0,0,7);ctx.fill();ctx.fillStyle=drought()?'#6C8090':'#5BC0EB';ctx.beginPath();ctx.ellipse(x+12,y+9,6,2.5,0,0,7);ctx.fill();break;
+  case'seawall':ctx.fillStyle='#7F8A94';ctx.fillRect(x+1,y+8,22,12);ctx.fillStyle='#A9B3BC';for(let k=0;k<3;k++)ctx.fillRect(x+2+k*7.2,y+6,6.4,5);
+    ctx.strokeStyle='#5F6A74';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x+8,y+11);ctx.lineTo(x+8,y+20);ctx.moveTo(x+16,y+11);ctx.lineTo(x+16,y+20);ctx.stroke();break;
+  case'market':ctx.fillStyle='#E9D8B0';ctx.fillRect(x+4,y+10,16,11);for(let k=0;k<5;k++){ctx.fillStyle=k%2?'#FFFFFF':'#D94B3B';ctx.fillRect(x+2+k*4,y+5,4,6);}
+    ctx.fillStyle='#6CC24A';ctx.fillRect(x+6,y+15,4,3);ctx.fillStyle='#FFC726';ctx.fillRect(x+11,y+15,3,3);ctx.fillStyle='#E2553F';ctx.fillRect(x+15,y+15,3,3);break;
+  case'aqua':ctx.fillStyle='rgba(200,240,225,.85)';ctx.fillRect(x+2,y+5,20,16);ctx.strokeStyle='#5E8F7E';ctx.lineWidth=1;for(let k=0;k<4;k++){ctx.beginPath();ctx.moveTo(x+2+k*6.6,y+5);ctx.lineTo(x+2+k*6.6,y+21);ctx.stroke();}
+    ctx.fillStyle='#2E8FC4';ctx.fillRect(x+4,y+15,16,5);ctx.fillStyle='#FFB03A';ctx.fillRect(x+7+Math.sin(time*2)*3,y+16.5,3,1.6);
+    ctx.fillStyle='#3E9A3E';for(let k=0;k<5;k++){ctx.beginPath();ctx.arc(x+5+k*3.5,y+11,1.8,0,7);ctx.fill();}break;
+  case'solar':ctx.fillStyle='#BCC6D0';ctx.fillRect(x+2,y+4,20,16);ctx.fillStyle='#1D3466';ctx.fillRect(x+3,y+5,18,14);
+    ctx.strokeStyle='#6F8FD8';ctx.lineWidth=.8;ctx.beginPath();for(let k=1;k<4;k++){ctx.moveTo(x+3+k*4.5,y+5);ctx.lineTo(x+3+k*4.5,y+19);}for(let k=1;k<3;k++){ctx.moveTo(x+3,y+5+k*4.7);ctx.lineTo(x+21,y+5+k*4.7);}ctx.stroke();break;
+  }
+}
+function drawWorker(w,selected){
+  const x=w.x*T,y=w.y*T,moving=w.path&&w.path.length,bob=moving&&!RM?Math.sin(time*14+w.anim)*1.2:0;
+  ctx.fillStyle='rgba(0,0,0,.25)';ctx.beginPath();ctx.ellipse(x,y+6,5,2,0,0,7);ctx.fill();
+  if(selected){ctx.strokeStyle='#FFFFFF';ctx.lineWidth=1.6;ctx.beginPath();ctx.ellipse(x,y+5,8,3.6,0,0,7);ctx.stroke();}
+  ctx.fillStyle='#1F3E8C';ctx.fillRect(x-3,y+1+bob,2.4,5);ctx.fillRect(x+.6,y+1+bob,2.4,5);
+  ctx.fillStyle='#FFC726';ctx.beginPath();ctx.roundRect?ctx.roundRect(x-4,y-5+bob,8,8,2.5):ctx.rect(x-4,y-5+bob,8,8);ctx.fill();
+  ctx.fillStyle='#7A4B2A';ctx.beginPath();ctx.arc(x,y-8+bob,3.2,0,7);ctx.fill();
+  if(w.working&&!RM){const a=Math.sin(time*10+w.anim)*.9;ctx.strokeStyle='#4A3420';ctx.lineWidth=1.6;ctx.beginPath();ctx.moveTo(x+4*(w.face||1),y-2);ctx.lineTo(x+(4+Math.cos(a)*6)*(w.face||1),y-2-Math.sin(a)*6);ctx.stroke();}
+  if(w.amt>=1){ctx.fillStyle=w.carry==='food'?'#6CC24A':w.carry==='water'?'#5BC0EB':'#E7E0CC';ctx.strokeStyle='rgba(0,0,0,.4)';ctx.lineWidth=1;ctx.beginPath();ctx.arc(x+(w.face||1)*-5,y-3+bob,3,0,7);ctx.fill();ctx.stroke();}
+}
+function draw(){
+  ctx.setTransform(DPR,0,0,DPR,0,0);ctx.fillStyle='#0A3478';ctx.fillRect(0,0,VW,VH);
+  let sx=0,sy=0;if(stormFx>0&&!RM){sx=(Math.random()-.5)*6;sy=(Math.random()-.5)*6;}
+  ctx.setTransform(DPR*z,0,0,DPR*z,(-cam.x*z+sx)*DPR,(-cam.y*z+sy)*DPR);
+  ctx.drawImage(terrC,0,0,W*T,H*T);ctx.drawImage(ownC,0,0,W*T,H*T);
+  const x0=Math.max(0,Math.floor(cam.x/T)-1),y0=Math.max(0,Math.floor(cam.y/T)-1),x1=Math.min(W-1,Math.ceil((cam.x+VW/z)/T)+1),y1=Math.min(H-1,Math.ceil((cam.y+VH/z)/T)+1);
+  if(sel&&sel.kind==='parish'){ctx.beginPath();polyPath(ctx,sel.p.poly,T);ctx.fillStyle='rgba(255,255,255,.16)';ctx.fill();ctx.strokeStyle='#FFFFFF';ctx.lineWidth=2/z;ctx.lineJoin='round';ctx.stroke();}
+  if(buildMode){ctx.fillStyle='rgba(255,236,150,.22)';for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)if(!placeReason(buildMode,x,y))ctx.fillRect(x*T+1,y*T+1,T-2,T-2);}
+  const showWalls=buildMode==='seawall'||(sel&&sel.kind==='building'&&sel.b.type==='seawall');
+  if(showWalls){ctx.strokeStyle='rgba(91,192,235,.85)';ctx.fillStyle='rgba(91,192,235,.08)';ctx.lineWidth=1.5;ctx.setLineDash([5,4]);
+    buildings.forEach(s=>{if(s.type==='seawall'&&s.done){ctx.beginPath();ctx.arc((s.x+.5)*T,(s.y+.5)*T,SEA_R*T,0,7);ctx.fill();ctx.stroke();}});ctx.setLineDash([]);}
+  for(const n of nodes){if(n.amt<=0||n.x<x0||n.x>x1||n.y<y0||n.y>y1)continue;drawNode(n);}
+  const vis=buildings.filter(b=>b.x+b.w>=x0&&b.x<=x1&&b.y+b.h>=y0&&b.y<=y1).sort((a,b)=>a.y-b.y);
+  vis.forEach(drawBuilding);
+  if(sel&&sel.kind==='building'){const b=sel.b;ctx.strokeStyle='#FFFFFF';ctx.lineWidth=2;ctx.strokeRect(b.x*T+.5,b.y*T+.5,b.w*T-1,b.h*T-1);}
+  if(sel&&sel.kind==='node'){const n=sel.n;ctx.strokeStyle='#FFFFFF';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc((n.x+.5)*T,(n.y+.5)*T,12,0,7);ctx.stroke();}
+  const sids=sel&&sel.kind==='workers'?sel.ids:null;
+  workers.slice().sort((a,b)=>a.y-b.y).forEach(w=>drawWorker(w,sids&&sids.has(w.id)));
+  marks.forEach(m=>{ctx.strokeStyle=`rgba(255,199,38,${m.t/.7})`;ctx.lineWidth=2;ctx.beginPath();ctx.arc(m.x*T,m.y*T,(1-m.t/.7)*10+4,0,7);ctx.stroke();});
+  // labels in screen space
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.font='800 10.5px Figtree, system-ui, sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';
+  try{ctx.letterSpacing='1px';}catch(e){}
+  parishes.forEach(p=>{const px=(p.lx*T-cam.x)*z,py=(p.ly*T-cam.y)*z;if(px<-80||px>VW+80||py<-20||py>VH+20)return;
+    const t=p.name.toUpperCase();ctx.lineWidth=3;ctx.strokeStyle='rgba(6,16,40,.7)';ctx.strokeText(t,px,py);
+    ctx.fillStyle=p.owner===1?'#FFE08A':p.owner===2?'#FFB4A6':'rgba(255,255,255,.9)';ctx.fillText(t,px,py);});
+  try{ctx.letterSpacing='0px';}catch(e){}
+  if(z>=.6){ctx.font='italic 600 10px Figtree, system-ui, sans-serif';TOWNS.forEach(t=>{const px=(t.x*T-cam.x)*z,py=((t.y-t.s*.62-.5)*T-cam.y)*z;if(px<-60||px>VW+60||py<-20||py>VH+20)return;
+    ctx.lineWidth=3;ctx.strokeStyle='rgba(6,16,40,.6)';ctx.strokeText(t.n,px,py);ctx.fillStyle='rgba(255,255,255,.92)';ctx.fillText(t.n,px,py);});}
+  const hq=buildings.find(b=>b.type==='hq');
+  if(hq){const px=((hq.x+1)*T-cam.x)*z,py=((hq.y+2)*T-cam.y)*z+9;ctx.font='800 9.5px Figtree, system-ui, sans-serif';ctx.lineWidth=3;ctx.strokeStyle='rgba(6,16,40,.8)';ctx.strokeText('AGROCORP',px,py);ctx.fillStyle='#FFB4A6';ctx.fillText('AGROCORP',px,py);}
+  if(stormFx>0){const a=Math.min(1,stormFx/1.5)*.4;ctx.fillStyle=`rgba(20,30,50,${a})`;ctx.fillRect(0,0,VW,VH);
+    if(!RM){ctx.strokeStyle='rgba(200,220,255,.45)';ctx.lineWidth=1;ctx.beginPath();for(let k=0;k<90;k++){const rx=Math.random()*VW,ry=Math.random()*VH;ctx.moveTo(rx,ry);ctx.lineTo(rx-10,ry+18);}ctx.stroke();}}
+  else if(drought()){ctx.fillStyle='rgba(255,170,60,.08)';ctx.fillRect(0,0,VW,VH);}
+}
+let miniT=0;
+function drawMini(){
+  const mw=mini.clientWidth,mh=mini.clientHeight,d=Math.min(2,window.devicePixelRatio||1);
+  if(mini.width!==mw*d){mini.width=mw*d;mini.height=mh*d;}
+  mctx.setTransform(d,0,0,d,0,0);mctx.fillStyle='#0A3478';mctx.fillRect(0,0,mw,mh);
+  const s=Math.min(mw/(W*T),mh/(H*T)),ox=(mw-W*T*s)/2,oy=(mh-H*T*s)/2;
+  mctx.drawImage(terrC,ox,oy,W*T*s,H*T*s);mctx.drawImage(ownC,ox,oy,W*T*s,H*T*s);
+  mctx.fillStyle='#FFC726';workers.forEach(w=>mctx.fillRect(ox+w.x*T*s-1,oy+w.y*T*s-1,2,2));
+  mctx.strokeStyle='#FFFFFF';mctx.lineWidth=1;mctx.strokeRect(ox+cam.x*s,oy+cam.y*s,VW/z*s,VH/z*s);
+  return{s,ox,oy};
+}
+
+// ---------- camera & input
+function clampCam(){const ww=W*T,hh=H*T,vw=VW/z,vh=VH/z;cam.x=Math.max(-vw*.4,Math.min(ww-vw*.6,cam.x));cam.y=Math.max(-vh*.4,Math.min(hh-vh*.6,cam.y));}
+function zoomAt(sx,sy,f){const wx=sx/z+cam.x,wy=sy/z+cam.y;z=Math.max(.55,Math.min(2.6,z*f));cam.x=wx-sx/z;cam.y=wy-sy/z;clampCam();}
+function resize(){DPR=Math.min(2,window.devicePixelRatio||1);VW=cv.clientWidth||innerWidth;VH=cv.clientHeight||innerHeight;cv.width=Math.round(VW*DPR);cv.height=Math.round(VH*DPR);}
+addEventListener('resize',()=>{resize();clampCam();});
+const ptrs=new Map();let moved=false,pinchD=0;
+cv.addEventListener('pointerdown',e=>{if(ptrs.size===0)moved=false;try{cv.setPointerCapture(e.pointerId);}catch(_){}ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY,sx:e.clientX,sy:e.clientY});pinchD=0;});
+cv.addEventListener('pointermove',e=>{const p=ptrs.get(e.pointerId);if(!p)return;
+  if(ptrs.size===1){if(Math.hypot(e.clientX-p.sx,e.clientY-p.sy)>9)moved=true;if(moved){cam.x-=(e.clientX-p.x)/z;cam.y-=(e.clientY-p.y)/z;clampCam();}}
+  else if(ptrs.size===2){moved=true;p.x=e.clientX;p.y=e.clientY;const[a,b]=[...ptrs.values()];const d=Math.hypot(a.x-b.x,a.y-b.y);if(pinchD)zoomAt((a.x+b.x)/2,(a.y+b.y)/2,d/pinchD);pinchD=d;return;}
+  p.x=e.clientX;p.y=e.clientY;});
+const up=e=>{if(!ptrs.has(e.pointerId))return;if(ptrs.size===1&&!moved&&running&&e.type==='pointerup')tap(e.clientX,e.clientY);ptrs.delete(e.pointerId);pinchD=0;};
+cv.addEventListener('pointerup',up);cv.addEventListener('pointercancel',up);
+cv.addEventListener('wheel',e=>{e.preventDefault();zoomAt(e.clientX,e.clientY,e.deltaY<0?1.12:1/1.12);},{passive:false});
+mini.addEventListener('pointerdown',e=>{const r=mini.getBoundingClientRect();const m=drawMini();const wx=(e.clientX-r.left-m.ox)/m.s,wy=(e.clientY-r.top-m.oy)/m.s;cam.x=wx-VW/z/2;cam.y=wy-VH/z/2;clampCam();});
+addEventListener('keydown',e=>{if(!running)return;if(e.key==='Escape')act('deselect');if(e.key==='b')act('build');if(e.key===' '){e.preventDefault();$('#b-pause').click();}});
+
+// ---------- loop
+let last=performance.now();
+function loop(now){const dt=Math.min(.1,(now-last)/1000);last=now;
+  if(running&&!paused)update(dt);
+  draw();hud();
+  panelT-=dt;if(panelT<=0){panelT=.25;renderPanel(false);}
+  miniT-=dt;if(miniT<=0){miniT=.3;drawMini();}
+  requestAnimationFrame(loop);}
+newGame();
+$('#start').onclick=startGame;
+requestAnimationFrame(loop);
+})();
+</script>
