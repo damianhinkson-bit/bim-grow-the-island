@@ -61,7 +61,7 @@ export class Renderer {
   async init(game: GameSession, mount: HTMLElement) {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     // keep GPU memory modest: phones crash and reload the page when a tab uses too much
-    await this.app.init({ resizeTo: window, background: '#0A3478', antialias: false, resolution: dpr, autoDensity: true, powerPreference: 'low-power' });
+    await this.app.init({ preference: 'webgl', resizeTo: window, background: '#0A3478', antialias: false, resolution: dpr, autoDensity: true, powerPreference: 'low-power' });
     this.app.canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); this.onContextLost?.(); });
     this.app.canvas.id = 'game';
     this.app.canvas.setAttribute('aria-label', 'Map of Barbados');

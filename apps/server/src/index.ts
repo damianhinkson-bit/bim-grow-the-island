@@ -39,7 +39,7 @@ const server = createServer((req, res) => {
   createReadStream(p).pipe(res);
 });
 
-const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 1024 * 1024 });
 wss.on('connection', (ws: WebSocket) => {
   let alive = true;
   const conn: Conn = {

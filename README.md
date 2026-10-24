@@ -32,6 +32,11 @@ npm run build:single -w @bim/client   # one self-contained HTML file (solo play 
 3. Wait for the first deploy (a few minutes). Your game is at `https://bim-grow-the-island.onrender.com` (or the name Render shows).
 4. Every push to `main` redeploys automatically.
 
+**Games survive restarts.** Render restarts the server on every deploy, and sometimes on its own. Rooms live only in
+the server's memory, so every phone keeps a save of its room (seats, settings and the game, every 5 seconds). When a
+phone reconnects to a server that has forgotten the room, it rebuilds it with the same code and the others rejoin
+their own seats. At most about 5 seconds of play is lost. A phone still on the old version reloads itself once.
+
 The free plan sleeps after 15 minutes without visitors; the first visit after that takes about a minute to wake.
 For no sleep, switch the service to a paid plan, or deploy the same build to Fly.io.
 

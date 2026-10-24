@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCommand, restore, stateHash, step, workersOf, type ServerMsg, type State } from '@bim/sim';
+import { PROTOCOL, applyCommand, restore, snapshot, stateHash, step, workersOf, type RoomSave, type ServerMsg, type State } from '@bim/sim';
 import { Lobby, type Conn } from '../src/rooms';
 
 /** A fake phone: records what the server sends and plays the game in lockstep like the real client. */
@@ -16,7 +16,7 @@ class Phone implements Conn {
   close() { this.closed = true; }
   last<T extends ServerMsg['t']>(t: T) { return [...this.inbox].reverse().find((m) => m.t === t) as Extract<ServerMsg, { t: T }> | undefined; }
 }
-const V = 1;
+const V = PROTOCOL;
 let clock = 1_000_000;
 const run = (lobby: Lobby, seconds: number) => { for (let k = 0; k < seconds * 10; k++) { clock += 100; lobby.update(clock); } };
 
@@ -184,5 +184,65 @@ describe('lobby survives phones switching apps', () => {
     lobby.drop(a);
     run(lobby, 610);
     expect(lobby.rooms.has(code)).toBe(false);
+  });
+});
+
+describe('server restarts', () => {
+  it('rebuilds a running game from a phone\'s save when the server restarts, with the same code and seats', () => {
+    const { lobby, phones, room, code, start } = setup(3);
+    start();
+    run(lobby, 20);
+    const tokens = phones.map((p) => p.last('joined')!.token);
+    // what each phone keeps: the latest seat list and a snapshot of its game
+    const save: RoomSave = { lobby: phones[1].last('lobby')!.lobby, snap: snapshot(phones[1].state!), at: Date.now() };
+    const tick = room.state!.tick;
+    // Render redeploys: every connection drops and the new server knows nothing
+    const fresh = new Lobby();
+    const b = new Phone();
+    fresh.handle(b, { t: 'join', code, name: 'Friend 1', token: tokens[1], v: V });
+    expect(b.last('error')).toMatchObject({ gone: true });
+    b.inbox = [];
+    fresh.handle(b, { t: 'revive', code, name: 'Friend 1', token: tokens[1], v: V, save });
+    expect(b.last('error')).toBeUndefined();
+    expect(b.me).toBe('p2');
+    expect(fresh.rooms.get(code)!.state!.tick).toBe(tick);
+    // the others come back with their own tokens and get their own seats
+    const a = new Phone(), c = new Phone();
+    fresh.handle(a, { t: 'join', code, name: 'Damian', token: tokens[0], v: V });
+    fresh.handle(c, { t: 'revive', code, name: 'Friend 2', token: tokens[2], v: V, save }); // a second rebuild just joins
+    expect([a.me, c.me]).toEqual(['p1', 'p3']);
+    const info = a.last('lobby')!.lobby;
+    expect(info.host).toBe(0);
+    expect(info.players.map((p) => [p.name, p.connected])).toEqual([['Damian', true], ['Friend 1', true], ['Friend 2', true]]);
+    run(fresh, 10);
+    const h = stateHash(fresh.rooms.get(code)!.state!);
+    for (const ph of [a, b, c]) expect(stateHash(ph.state!)).toBe(h);
+    // a stranger can't take a seat, or rebuild a room with a made-up save
+    const x = new Phone();
+    fresh.handle(x, { t: 'join', code, name: 'X', token: 'nope', v: V });
+    expect(x.last('error')?.msg).toContain('already started');
+    const y = new Phone();
+    fresh.handle(y, { t: 'revive', code: 'QQQQQ', name: 'Y', token: 'mine', v: V, save });
+    expect(y.last('error')?.msg).toContain('No game');
+    expect(fresh.rooms.has('QQQQQ')).toBe(false);
+  });
+  it('rebuilds a lobby too, and the caretaker takes over seats nobody comes back to', () => {
+    const { lobby, phones, code } = setup(2);
+    const tokens = phones.map((p) => p.last('joined')!.token);
+    const save: RoomSave = { lobby: phones[0].last('lobby')!.lobby, at: Date.now() };
+    void lobby;
+    const fresh = new Lobby(), a = new Phone();
+    fresh.handle(a, { t: 'revive', code, name: 'Damian', token: tokens[0], v: V, save });
+    expect(a.last('lobby')!.lobby.players.map((p) => [p.name, p.connected])).toEqual([['Damian', true], ['Friend 1', false]]);
+    const b = new Phone();
+    fresh.handle(b, { t: 'join', code, name: 'Friend 1', token: tokens[1], v: V });
+    fresh.handle(a, { t: 'start' });
+    expect(a.me).toBe('p1'); expect(b.me).toBe('p2');
+  });
+  it('turns a damaged save away', () => {
+    const fresh = new Lobby(), a = new Phone();
+    fresh.handle(a, { t: 'revive', code: 'ABCDE', name: 'A', token: 't', v: V, save: { lobby: { players: [] }, at: 0 } as unknown as RoomSave });
+    expect(a.last('error')?.msg).toContain('damaged');
+    expect(fresh.rooms.size).toBe(0);
   });
 });

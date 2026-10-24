@@ -43,11 +43,16 @@ async function boot() {
   function handlers() {
     return {
       lobby: (l: Parameters<Menu['lobby']>[0], slot: number) => {
-        if (!l.started) { menu.lobby(l, slot); history.replaceState(null, '', `${location.pathname}?room=${l.code}`); }
+        if (!l.started) { try { sessionStorage.removeItem('bim:reloaded'); } catch { /* blocked */ } menu.lobby(l, slot); history.replaceState(null, '', `${location.pathname}?room=${l.code}`); }
       },
-      started: (g: NetworkGame) => play(g),
+      started: (g: NetworkGame) => { try { sessionStorage.removeItem('bim:reloaded'); } catch { /* blocked */ } play(g); },
       error: (msg: string, fatal: boolean) => {
         if (!fatal) { ui.toast(msg, 'warn'); return; }
+        // the game was updated while this page was open: reload once to get the new version, then rejoin
+        if (/out of date/i.test(msg)) {
+          let tried = false; try { tried = sessionStorage.getItem('bim:reloaded') === '1'; sessionStorage.setItem('bim:reloaded', '1'); } catch { /* blocked */ }
+          if (!tried) { menu.waiting('The game was just updated. Loading the new version…'); setTimeout(() => location.reload(), 600); return; }
+        }
         // the room is gone (or full): forget it so the menu doesn't keep offering it
         const code = new URLSearchParams(location.search).get('room');
         if (code && /no game|already started|full/i.test(msg)) { try { localStorage.removeItem(`bim:token:${code}`); } catch { /* blocked */ } history.replaceState(null, '', location.pathname); }

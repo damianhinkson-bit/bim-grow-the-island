@@ -1,10 +1,14 @@
 import {
-  DT, PROTOCOL, applyCommand, restore, stateHash, step,
-  type ClientMsg, type CmdResult, type Command, type GameEvent, type LobbyInfo, type ServerMsg, type State,
+  DT, PROTOCOL, applyCommand, restore, snapshot, stateHash, step,
+  type ClientMsg, type CmdResult, type Command, type GameEvent, type LobbyInfo, type RoomSave, type ServerMsg, type State,
 } from '@bim/sim';
 import type { GameSession } from './game';
 
 const HASH_EVERY = 50;
+/** How often (in ticks) the phone saves the game, so the room survives a server restart: every 5 s. */
+const SAVE_EVERY = 50;
+/** Saves older than this aren't offered to rebuild a room. */
+const SAVE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** Where the game server lives: the same host that served this page (Vite's dev server proxies /ws to it). */
 export function serverUrl(): string {
@@ -14,8 +18,16 @@ export function serverUrl(): string {
 
 const store = {
   get(k: string) { try { return localStorage.getItem(k); } catch { return null; } },
-  set(k: string, v: string) { try { localStorage.setItem(k, v); } catch { /* storage blocked */ } },
+  set(k: string, v: string) { try { localStorage.setItem(k, v); } catch { /* storage blocked or full */ } },
+  del(k: string) { try { localStorage.removeItem(k); } catch { /* storage blocked */ } },
 };
+/** In memory too, in case storage is blocked or full: a server restart mid-game is the common case. */
+const memSaves = new Map<string, RoomSave>();
+function loadSave(code: string): RoomSave | null {
+  let sv = memSaves.get(code) ?? null;
+  if (!sv) { try { sv = JSON.parse(store.get(`bim:save:${code}`) ?? 'null'); } catch { sv = null; } }
+  return sv && Date.now() - sv.at < SAVE_MAX_AGE_MS ? sv : null;
+}
 
 export interface NetHandlers {
   lobby(l: LobbyInfo, mySlot: number): void;
@@ -77,7 +89,7 @@ export class NetworkGame implements GameSession {
   leave() {
     this.closing = true; clearTimeout(this.retryTimer); document.removeEventListener('visibilitychange', this.onVisible);
     this.raw({ t: 'leave' }); this.ws?.close();
-    if (this.code) { try { localStorage.removeItem(`bim:token:${this.code}`); } catch { /* storage blocked */ } }
+    if (this.code) { store.del(`bim:token:${this.code}`); store.del(`bim:save:${this.code}`); memSaves.delete(this.code); }
   }
 
   send(c: Command): CmdResult {
@@ -119,7 +131,17 @@ export class NetworkGame implements GameSession {
     }
     step(s);
     if (s.tick % HASH_EVERY === 0) this.raw({ t: 'hash', tick: s.tick, h: stateHash(s) });
+    if (s.tick % SAVE_EVERY === 0) this.save();
   }
+
+  /** Keeps a copy of the room (seats, settings and, once started, the game) to rebuild it if the server restarts. */
+  private save() {
+    if (!this.code || !this.lobbyInfo) return;
+    const sv: RoomSave = { lobby: this.lobbyInfo, snap: this.state ? snapshot(this.state) : undefined, at: Date.now() };
+    memSaves.set(this.code, sv);
+    store.set(`bim:save:${this.code}`, JSON.stringify(sv));
+  }
+  private revived = false;
 
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private rejoin() { this.open(() => this.raw({ t: 'join', code: this.code, name: this.name, token: this.token, v: PROTOCOL })); }
@@ -155,13 +177,14 @@ export class NetworkGame implements GameSession {
   private onMsg(m: ServerMsg) {
     switch (m.t) {
       case 'joined':
-        this.code = m.code; this.slot = m.slot; this.token = m.token;
+        this.code = m.code; this.slot = m.slot; this.token = m.token; this.revived = false;
         store.set(`bim:token:${m.code}`, m.token);
         break;
       case 'lobby': {
         // during a game, lobby updates tell us who dropped out or came back
         const before = this.lobbyInfo;
         this.lobbyInfo = m.lobby;
+        if (!this.state || m.lobby.players.some((p, k) => p.key !== before?.players[k]?.key)) this.save();
         if (this.state && before) for (const p of m.lobby.players) {
           const was = before.players.find((q) => q.slot === p.slot);
           if (!was || p.slot === this.slot) continue;
@@ -181,7 +204,18 @@ export class NetworkGame implements GameSession {
       case 'tick': this.queue.push(m); break;
       case 'snap': this.state = restore(m.snap); this.queue = this.queue.filter((q) => q.n > this.state.tick); this.lastSeq = this.state.eventSeq; break;
       case 'paused': this.serverPaused = m.paused; this.h.paused(m.paused, m.by); break;
-      case 'error': this.h.error(m.msg, !!m.fatal); if (m.fatal) { this.closing = true; this.ws?.close(); } break;
+      case 'error': {
+        // the server doesn't know our room: it probably restarted (it does on every update). Rebuild it from our save.
+        const sv = m.gone && this.code && this.token && !this.revived ? loadSave(this.code) : null;
+        if (sv) {
+          this.revived = true;
+          this.h.status(this.state ? 'The game server restarted. Picking up where you left off…' : null);
+          this.raw({ t: 'revive', code: this.code, name: this.name, token: this.token, v: PROTOCOL, save: sv });
+          break;
+        }
+        this.h.error(m.msg, !!m.fatal); if (m.fatal) { this.closing = true; this.ws?.close(); }
+        break;
+      }
     }
   }
 }

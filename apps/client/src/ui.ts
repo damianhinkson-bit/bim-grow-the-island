@@ -13,6 +13,9 @@ const $ = <E extends HTMLElement = HTMLElement>(s: string) => document.querySele
 const fmtT = (sec: number) => { const s = Math.max(0, Math.ceil(sec)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
 export class UI {
+  /** Whether a finger is down inside this element (without :has(), which older iPhones don't support). */
+  private pressedIn(sel: string) { const el = document.querySelector(sel); const a = el?.ownerDocument.querySelectorAll(':active'); return !!el && !!a && [...a].some((x) => el.contains(x)); }
+
   view: View = { sel: null, buildMode: null, marks: [], roadMode: false, roadDraft: new Set() };
   private menu: 'build' | 'money' | 'trade' | null = null;
   /** The trade or gift form: who it's for. */
@@ -468,7 +471,7 @@ export class UI {
   private closeDash() { this.dashOpen = false; $('#dash').hidden = true; $('#b-dash').classList.remove('on'); }
   private renderDash(force = false) {
     // don't swap the buttons out from under a finger that's pressing one
-    if (!force && $('#dash-body').matches(':active, :has(:active)')) return;
+    if (!force && this.pressedIn('#dash-body')) return;
     const h = dashboardHTML(this.s, this.game.me, this.flows, (pid) => this.game.connected?.(pid) ?? true, (pid) => this.game.caretaken?.(pid) ?? false);
     if (force || h !== this.lastDash) { $('#dash-body').innerHTML = h; this.lastDash = h; }
   }

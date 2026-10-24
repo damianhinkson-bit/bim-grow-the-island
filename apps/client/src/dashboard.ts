@@ -16,7 +16,7 @@ export class FlowTracker {
     const p = player(s, me); if (!p) return;
     const last = this.samples[this.samples.length - 1];
     if (last && s.time - last.t < 1) return;
-    this.samples.push({ t: s.time, f: structuredClone(p.flow) });
+    this.samples.push({ t: s.time, f: JSON.parse(JSON.stringify(p.flow)) });
     while (this.samples.length > 31) this.samples.shift();
   }
   reset() { this.samples = []; }

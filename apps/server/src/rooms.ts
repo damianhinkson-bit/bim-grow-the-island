@@ -1,7 +1,7 @@
-import { randomBytes, randomInt } from 'node:crypto';
+import { createHash, randomBytes, randomInt } from 'node:crypto';
 import {
-  AI_AFTER_S, AI_EVERY, CODE_LEN, DIFFICULTY, DT, MAX_PLAYERS, PLAYER_COLORS, PROTOCOL, applyCommand, caretaker, createGame, snapshot, stateHash, step,
-  type ClientMsg, type Command, type Difficulty, type LobbyInfo, type Mode, type ServerMsg, type State,
+  AI_AFTER_S, AI_EVERY, CODE_LEN, DIFFICULTY, DT, MAX_PLAYERS, PLAYER_COLORS, PROTOCOL, applyCommand, caretaker, createGame, restore, snapshot, stateHash, step,
+  type ClientMsg, type Command, type Difficulty, type LobbyInfo, type Mode, type RoomSave, type ServerMsg, type State,
 } from '@bim/sim';
 
 /** A connection as the room sees it. The WebSocket server wraps real sockets in this. */
@@ -14,7 +14,10 @@ const IDLE_ROOM_MS = 10 * 60 * 1000;
 const LOBBY_SEAT_MS = 10 * 60 * 1000, HOST_HANDOVER_MS = 5 * 60 * 1000;
 const MAX_CMDS_PER_TICK = 25;
 
-interface Slot { name: string; token: string; conn: Conn | null; pauses: number; lastSeen: number; awaySince: number; ai: boolean }
+/** A one-way fingerprint of a seat token: safe to share, proves nothing unless you hold the token. */
+export const seatKey = (token: string) => createHash('sha256').update(String(token)).digest('hex').slice(0, 24);
+
+interface Slot { name: string; key: string; conn: Conn | null; pauses: number; lastSeen: number; awaySince: number; ai: boolean }
 
 export class Room {
   code: string;
@@ -40,7 +43,7 @@ export class Room {
   lobby(): LobbyInfo {
     return {
       code: this.code, host: this.host, mode: this.mode, difficulty: this.difficulty, started: this.started,
-      players: this.slots.map((s, k) => ({ slot: k, name: s.name, color: PLAYER_COLORS[k], connected: !!s.conn, ai: s.ai })),
+      players: this.slots.map((s, k) => ({ slot: k, name: s.name, color: PLAYER_COLORS[k], connected: !!s.conn, ai: s.ai, key: s.key })),
     };
   }
   broadcast(m: ServerMsg) { for (const s of this.slots) s.conn?.send(m); }
@@ -48,11 +51,12 @@ export class Room {
 
   /** Adds a new player, or reconnects an existing one by token. Returns the slot, or an error message. */
   join(conn: Conn, name: string, token?: string): number | string {
-    const back = token ? this.slots.findIndex((s) => s.token === token) : -1;
+    const key = token ? seatKey(token) : '';
+    const back = key ? this.slots.findIndex((s) => s.key === key) : -1;
     if (back >= 0) {
       const s = this.slots[back];
       s.conn?.close(); s.conn = conn; s.lastSeen = Date.now(); s.ai = false; s.awaySince = 0; this.emptySince = 0;
-      conn.send({ t: 'joined', code: this.code, slot: back, token: s.token });
+      conn.send({ t: 'joined', code: this.code, slot: back, token: token! });
       this.sendLobby();
       if (this.state) conn.send({ t: 'start', snap: snapshot(this.state), you: this.pid(back) });
       if (this.paused) conn.send({ t: 'paused', paused: true, by: this.pausedBy });
@@ -60,12 +64,34 @@ export class Room {
     }
     if (this.started) return 'That game has already started. Ask the host for a new code.';
     if (this.slots.length >= MAX_PLAYERS) return `That game is full (${MAX_PLAYERS} players).`;
-    const slot: Slot = { name: cleanName(name, this.slots.length), token: randomBytes(12).toString('hex'), conn, pauses: 0, lastSeen: Date.now(), awaySince: 0, ai: false };
+    const fresh = randomBytes(12).toString('hex');
+    const slot: Slot = { name: cleanName(name, this.slots.length), key: seatKey(fresh), conn, pauses: 0, lastSeen: Date.now(), awaySince: 0, ai: false };
     this.slots.push(slot); this.emptySince = 0;
     const k = this.slots.length - 1;
-    conn.send({ t: 'joined', code: this.code, slot: k, token: slot.token });
+    conn.send({ t: 'joined', code: this.code, slot: k, token: fresh });
     this.sendLobby();
     return k;
+  }
+
+  /**
+   * Rebuilds a room the server forgot (it restarted) from a phone's save: same code, same seats, same game. Every seat
+   * starts as away; each phone takes its seat back with its own token. Returns an error message if the save is bad.
+   */
+  revive(save: RoomSave): string | null {
+    const l = save?.lobby;
+    if (!l || !Array.isArray(l.players) || !l.players.length || l.players.length > MAX_PLAYERS) return 'That saved game is damaged.';
+    if (!l.players.every((p) => typeof p?.key === 'string' && p.key.length === 24)) return 'That saved game is damaged.';
+    this.slots = l.players.map((p, k) => ({ name: cleanName(p.name, k), key: p.key, conn: null, pauses: 0, lastSeen: Date.now(), awaySince: -1, ai: false }));
+    this.host = Number.isInteger(l.host) && l.host >= 0 && l.host < this.slots.length ? l.host : 0;
+    if (l.mode === 'coop' || l.mode === 'versus') this.mode = l.mode;
+    if (l.difficulty in DIFFICULTY) this.difficulty = l.difficulty;
+    if (save.snap) {
+      try { this.state = restore(JSON.parse(JSON.stringify(save.snap))); } catch { return 'That saved game is damaged.'; }
+      if (!this.state?.players || this.state.players.length !== this.slots.length) { this.state = null; return 'That saved game is damaged.'; }
+      this.last = this.clock; this.acc = 0;
+    }
+    this.emptySince = -1;
+    return null;
   }
 
   /**
@@ -206,7 +232,7 @@ export class Lobby {
 
   handle(conn: Conn, m: ClientMsg) {
     if (!m || typeof m !== 'object' || typeof (m as { t?: unknown }).t !== 'string') return;
-    if (m.t === 'create' || m.t === 'join') {
+    if (m.t === 'create' || m.t === 'join' || m.t === 'revive') {
       if (m.v !== PROTOCOL) { conn.send({ t: 'error', msg: 'Your game is out of date. Reload the page.', fatal: true }); return; }
       this.byConn.get(conn)?.disconnect(conn);
       let room: Room | undefined;
@@ -214,10 +240,19 @@ export class Lobby {
         if (this.rooms.size >= 500) { conn.send({ t: 'error', msg: 'The server is full right now. Try again soon.', fatal: true }); return; }
         room = new Room(this.newCode()); this.rooms.set(room.code, room);
       } else {
-        room = this.rooms.get(String(m.code ?? '').toUpperCase().trim());
-        if (!room) { conn.send({ t: 'error', msg: "No game with that code. Check the letters with the host.", fatal: true }); return; }
+        const code = String(m.code ?? '').toUpperCase().trim();
+        room = this.rooms.get(code);
+        // the first phone back after a server restart rebuilds the room; later ones just join it
+        if (!room && m.t === 'revive' && new RegExp(`^[${ALPHABET}]{${CODE_LEN}}$`).test(code)) {
+          const fresh = new Room(code), bad = fresh.revive(m.save);
+          if (bad) { conn.send({ t: 'error', msg: bad, fatal: true }); return; }
+          if (!fresh.slots.some((s) => s.key === seatKey(m.token))) { conn.send({ t: 'error', msg: "No game with that code. Check the letters with the host.", fatal: true }); return; }
+          room = fresh; this.rooms.set(code, room);
+          console.log(`revived room ${code} at tick ${room.state?.tick ?? 'lobby'}`);
+        }
+        if (!room) { conn.send({ t: 'error', msg: "No game with that code. Check the letters with the host.", fatal: true, gone: true }); return; }
       }
-      const r = room.join(conn, m.name, m.t === 'join' ? m.token : undefined);
+      const r = room.join(conn, m.name, m.t === 'create' ? undefined : m.token);
       if (typeof r === 'string') { conn.send({ t: 'error', msg: r, fatal: true }); if (!room.slots.length) this.rooms.delete(room.code); return; }
       this.byConn.set(conn, room);
       return;

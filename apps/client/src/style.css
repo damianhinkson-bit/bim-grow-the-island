@@ -49,9 +49,9 @@ body{background:var(--sea);color:var(--fg);font-family:var(--body);-webkit-user-
 #bar .btn.on{background:var(--gold);color:var(--ink)}
 .tag{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;padding:2px 7px;border-radius:999px;margin-right:4px}
 .t-you{background:var(--gold);color:var(--ink)}.t-rival{background:var(--rival);color:#fff}.t-free{background:rgba(255,255,255,.14);color:var(--fg)}
-#overlay{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;background:rgba(4,12,34,.82);
+#overlay{position:fixed;inset:0;z-index:10;display:flex;align-items:flex-start;justify-content:center;background:rgba(4,12,34,.82);
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px;overflow:auto}
-.card{max-width:440px;width:100%;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px 20px 20px;box-sizing:border-box}
+.card{max-width:440px;width:100%;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px 20px 20px;box-sizing:border-box;margin:auto}
 .flag{display:flex;height:8px;border-radius:4px;overflow:hidden;width:72px;margin-bottom:14px}
 .flag i{flex:1;background:var(--ultra)}.flag i:nth-child(2){background:var(--gold)}
 .card h1{font-family:var(--display);font-weight:400;font-size:40px;line-height:1;margin:0 0 6px;color:var(--gold);text-wrap:balance}

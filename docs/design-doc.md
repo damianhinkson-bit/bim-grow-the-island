@@ -242,6 +242,14 @@ Up to **4 players** online, alongside single-player:
 - **Multiplayer built (step 3).** Lockstep instead of Colyseus state sync: phones run the same simulation and the server relays commands each 0.1 s tick while running its own copy as referee (fingerprint checks every 5 s, snapshot resync, rejoin by token). Plain WebSockets replace Colyseus. One Render web service hosts the game page and the server. Rooms: 5-letter codes and invite links, host picks Co-op or Versus and AgroCorp difficulty, up to 4 players. Pauses are shared (3 per player, 60 s max). Trading: offers last 60 s and are checked again on accept; gifts only between co-op teammates. Still to do: Versus win timer.
 - **Caretaker for away players (built).** Everyone sees when a player leaves or returns (messages, faded player dots, Away on the dashboard). After 2 minutes away, the server's caretaker runs that co-op until they return: it staffs farms, sends idle workers to what's short (food first, preferring their own land), trains workers and builds houses when there's room, and puts a building in any of their parishes AgroCorp is about to buy. It never ages up, feeds new parishes or trades. Its commands travel with everyone else's, so phones stay in lockstep.
 
+### Pre-flight fixes (v0.6)
+
+- **Server restarts don't end games.** Each phone saves its room every 5 s; the first phone back after a restart rebuilds it with the same code. Seats are matched by a one-way fingerprint of each player's secret token, so nobody can take another player's seat.
+- **Updates while playing:** a phone on the old version reloads once and rejoins.
+- **Landscape:** menus taller than the screen used to lose their top; fixed.
+- **Older iPhones (iOS 15.3 and earlier):** removed two browser features they lack, and built for older Safari.
+- **Not testable here:** real iPhone Safari (its engine can't be downloaded in this workspace). Test on an iPhone before a big session.
+
 ## 15. Build plan
 
 1. ✅ **Real map:** coastline, parishes, terrain and towns.
