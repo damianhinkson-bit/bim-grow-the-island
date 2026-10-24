@@ -1,3 +1,10 @@
+// fonts ship with the game: a page that waits on Google Fonts stays blank on networks that block or slow it
+import '@fontsource/figtree/latin-400.css';
+import '@fontsource/figtree/latin-600.css';
+import '@fontsource/figtree/latin-800.css';
+import '@fontsource/lilita-one/latin-400.css';
+import '@fontsource/cinzel/latin-700.css';
+import '@fontsource/cinzel/latin-900.css';
 import './style.css';
 import { stateHash, type Difficulty } from '@bim/sim';
 import { LocalGame, type GameSession } from './game';
@@ -13,6 +20,7 @@ async function boot() {
   r.onContextLost = () => {
     const o = document.getElementById('overlay')!, c = document.getElementById('card')!;
     c.innerHTML = '<h1 style="font-size:28px">Your phone needs a moment</h1><p class="sub">The browser ran short of graphics memory. Close other tabs or apps, then reload. Online games pick up where you left off.</p><button class="btn primary" onclick="location.reload()">Reload</button>';
+    o.classList.remove('poster', 'dim', 'bare'); c.classList.remove('home', 'open');
     o.hidden = false;
   };
   try {

@@ -523,6 +523,7 @@ export class UI {
       <p class="sub">${won ? `Your co-op feeds ${owned(s, me.id)} parishes in the Co-op Age. Barbados eats what Barbados grows.` : o.winners.includes(AGRO) ? `AgroCorp now controls ${owned(s, AGRO)} parishes. Feed more parishes earlier and keep a building in each one.` : `${player(s, o.winners[0])?.name} fed their parishes first.`}</p>
       <ul><li><strong>${Math.floor(me.stats.food)}</strong> food grown and gathered</li><li><strong>${workersOf(s, me.id).length}</strong> workers, <strong>${Object.values(s.buildings).filter((b) => b.owner === me.id && b.done).length}</strong> buildings standing</li><li><strong>${s.weather.hurrIdx}</strong> hurricanes weathered</li></ul>
       <button class="btn primary" id="again">Back to the menu</button>`;
+    $('#overlay').classList.remove('poster', 'dim', 'bare'); $('#card').classList.remove('home', 'open');
     $('#overlay').hidden = false;
     $('#again').onclick = () => this.onEnd();
   }

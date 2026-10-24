@@ -8,6 +8,15 @@
     "build": "vite build",
     "build:single": "vite build --mode single"
   },
-  "dependencies": { "@bim/sim": "0.1.0", "pixi.js": "8.9.2" },
-  "devDependencies": { "vite": "6.3.5", "vite-plugin-singlefile": "2.2.0" }
+  "dependencies": {
+    "@bim/sim": "0.1.0",
+    "@fontsource/cinzel": "^5.2.5",
+    "@fontsource/figtree": "^5.2.5",
+    "@fontsource/lilita-one": "^5.2.5",
+    "pixi.js": "8.9.2"
+  },
+  "devDependencies": {
+    "vite": "6.3.5",
+    "vite-plugin-singlefile": "2.2.0"
+  }
 }

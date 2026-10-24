@@ -248,6 +248,8 @@ Up to **4 players** online, alongside single-player:
 - **Updates while playing:** a phone on the old version reloads once and rejoins.
 - **Landscape:** menus taller than the screen used to lose their top; fixed.
 - **Older iPhones (iOS 15.3 and earlier):** removed two browser features they lack, and built for older Safari.
+- **Start screen is Damian's poster** ("BARBADOS:" with heroes from the island's history and today), with "Grow the Island" under it. Two choices: Play solo or Play online; difficulty is a small Easy/Normal/Hard row. How to play sits behind a link. The poster is dimmed behind the invite and lobby screens.
+- **Fonts ship with the game** instead of loading from Google, which left the page blank on networks that block it.
 - **Not testable here:** real iPhone Safari (its engine can't be downloaded in this workspace). Test on an iPhone before a big session.
 
 ## 15. Build plan

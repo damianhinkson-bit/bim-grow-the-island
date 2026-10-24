@@ -163,3 +163,52 @@ body{background:var(--sea);color:var(--fg);font-family:var(--body);-webkit-user-
 .linkbtn{font:inherit;font-size:13.5px;color:var(--muted);background:none;border:0;text-decoration:underline;padding:12px;margin-top:4px;width:100%;cursor:pointer}
 .linkbtn:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 #card .btn.primary.big{margin-bottom:10px}
+
+/* ---------- Start screen: the poster ---------- */
+/* Home: the poster gets its own area and the controls sit under it, so "BARBADOS:" always lands right above "GROW THE
+   ISLAND" whatever the screen shape. Other menu screens show the poster dimmed behind their card. */
+#overlay.poster{background:#261b15 url('./assets/poster.webp') center bottom / cover no-repeat}
+#overlay.poster.dim{background-image:linear-gradient(rgba(8,6,4,.62),rgba(8,6,4,.62)),url('./assets/poster.webp')}
+#overlay.poster.bare{background:#261b15;padding:0}
+.card.home{background:none;border:0;border-radius:0;max-width:none;padding:0;margin:0;align-self:stretch;
+  display:flex;flex-direction:column;min-height:100%}
+.hposter{flex:1;min-height:180px;background:url('./assets/poster.webp') center bottom / cover no-repeat;position:relative;
+  padding-top:calc(env(safe-area-inset-top,0px) + 14px)}
+.hposter::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:28px;background:linear-gradient(rgba(38,27,21,0),#261b15)}
+.presents{font-family:'Cinzel',Georgia,serif;font-weight:700;font-size:12px;letter-spacing:3px;text-transform:uppercase;
+  color:#fff;text-align:center;text-shadow:0 1px 3px rgba(0,30,70,.9),0 0 10px rgba(0,30,70,.6)}
+.hbottom{margin:0 auto;width:100%;max-width:440px;box-sizing:border-box;padding:2px max(16px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 10px) max(16px,env(safe-area-inset-left,0px))}
+.ptitle{font-family:'Cinzel',Georgia,serif!important;font-weight:900!important;font-size:26px!important;letter-spacing:3px;text-transform:uppercase;
+  text-align:center;margin:0 0 14px!important;line-height:1.05!important;color:#F4C95D!important;
+  background:linear-gradient(#FFE7A3,#E9B54A 55%,#B9842B);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+  filter:drop-shadow(0 2px 0 #3b2510) drop-shadow(0 3px 6px rgba(0,0,0,.7))}
+.pick2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.pick2 .btn{font-size:17px;padding:14px 8px}
+.btn.gold-ghost{background:rgba(20,13,8,.72);border:2px solid #E9B54A;color:#FFE7A3}
+.hlinks{display:flex;justify-content:center;margin-top:4px}
+.card.home .linkbtn{color:#F6E3B8}
+.card.home .credit{font-size:10px;color:rgba(246,227,184,.55);margin:2px 0 0}
+.card.home .note{background:rgba(0,0,0,.35)}
+.card.home .how .sub{color:#F3EBDD}
+.card.home .how ul{color:#E8DDC7}
+.card.home .how ul strong{color:#fff}
+.card.home .hint{color:#E8DDC7;text-align:center;margin:0 0 10px;font-size:13px}
+.card.home .field,.card.home .or{color:#E8DDC7}
+.diffrow{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.diffrow .kicker{margin:0;color:#F6E3B8}
+.diffrow .seg{flex:1;margin:0}
+.seg.small .seg-b,.diffrow .seg-b{padding:7px 4px;font-size:13px;border-radius:999px}
+.diffrow .seg-b{background:rgba(0,0,0,.3);border-color:rgba(233,181,74,.55)}
+.diffrow .seg-b.on{background:var(--gold);border-color:var(--gold)}
+/* shorter, wider phones (e.g. iPhone SE): show the whole poster instead of cutting off heads, over a dimmed copy */
+@media (orientation:portrait) and (min-aspect-ratio:1/2){
+  .hposter{background:url('./assets/poster.webp') center bottom / contain no-repeat,linear-gradient(rgba(38,27,21,.72),#261b15),url('./assets/poster.webp') center top / cover no-repeat}
+}
+/* phones on their side: poster on the left, controls in the space beside it */
+@media (orientation:landscape){
+  .card.home{flex-direction:row}
+  .hposter{flex:none;width:calc(100vh * 0.45);min-height:0;background-size:cover;background-position:center bottom}
+  .hposter::after{left:auto;top:0;bottom:0;right:-1px;width:36px;height:auto;background:linear-gradient(90deg,rgba(38,27,21,0),#261b15)}
+  .presents{display:none}
+  .hbottom{align-self:center;padding:16px max(16px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 12px) 24px}
+}

@@ -19,8 +19,10 @@ export interface MenuActions {
 }
 
 const seg = (id: string, opts: [string, string, string][], on: string) =>
-  `<div class="seg" id="${id}" role="radiogroup">${opts.map(([v, l, sub]) => `<button class="seg-b${v === on ? ' on' : ''}" role="radio" aria-checked="${v === on}" data-v="${v}">${l}<small>${sub}</small></button>`).join('')}</div>`;
+  `<div class="seg" id="${id}" role="radiogroup">${opts.map(([v, l, sub]) => `<button class="seg-b${v === on ? ' on' : ''}" role="radio" aria-checked="${v === on}" data-v="${v}">${l}${sub ? `<small>${sub}</small>` : ""}</button>`).join('')}</div>`;
 const DIFF_OPTS: [string, string, string][] = [['easy', 'Easy', 'Slow, lots of warning'], ['normal', 'Normal', 'A fair race'], ['hard', 'Hard', 'Buys fast']];
+/** Just the names, for the compact difficulty row; the hint under it explains the one picked. */
+const DIFF_SMALL = DIFF_OPTS.map(([v, l]) => [v, l, ''] as [string, string, string]);
 
 /** The start screen and the online lobby, drawn into the overlay card. */
 export class Menu {
@@ -41,7 +43,7 @@ export class Menu {
 
   private card() { return $('#card'); }
   show() { $('#overlay').hidden = false; }
-  hide() { $('#overlay').hidden = true; }
+  hide() { const o = $('#overlay'); o.hidden = true; o.classList.remove('poster', 'dim', 'bare'); this.card().classList.remove('home', 'open'); }
 
   home(note?: string) {
     this.show(); this.resetLobby();
@@ -49,42 +51,57 @@ export class Menu {
     const code = (params.get('room') ?? '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5);
     const name = store.get('bim:name') ?? '';
     if (code && ONLINE && !this.soloInstead) { this.invite(code, name, note); return; }
-    this.card().innerHTML = `<div class="flag"><i></i><i></i><i></i></div>
-      <div class="kicker">Damian Grows presents</div>
-      <h1>Bim: Grow the Island</h1>
-      <p class="sub">Grow food for Barbados. Feed <strong>6 of the 11 parishes</strong> and grow through five ages to the <strong>Co-op Age</strong> before AgroCorp buys up the island.</p>
-      ${note ? `<p class="note">${esc(note)}</p>` : ''}
-      <ul>
-        <li><strong>Tap a worker</strong>, then tap breadfruit, coral stone, a spring or flying fish to gather.</li>
-        <li><strong>Build</strong> houses, farms, roads and seawalls; trade at the port and airport.</li>
-        <li><strong>Tap a parish</strong> next to yours to feed it and win it over.</li>
-        <li><strong>Money (BBD)</strong> comes from co-op dues in every parish you feed, and from selling food.</li>
-        <li>Drag to pan. Pinch or scroll to zoom.</li>
-      </ul>
-      <div class="mtabs" role="tablist">
-        <button class="mtab${code ? '' : ' on'}" data-tab="solo" role="tab">Play solo</button>
-        <button class="mtab${code ? ' on' : ''}" data-tab="online" role="tab">Play online</button>
-      </div>
-      <div class="mpane" data-pane="solo"${code ? ' hidden' : ''}>
-        <div class="kicker">AgroCorp difficulty</div>
-        ${seg('difficulty', DIFF_OPTS, this.difficulty)}
-        <button class="btn primary" id="go-solo">Start growing</button>
-      </div>
-      <div class="mpane" data-pane="online"${code ? '' : ' hidden'}>
-        ${ONLINE ? `
-        <label class="field" for="nm">Your name<input id="nm" maxlength="16" autocomplete="nickname" placeholder="e.g. Damian" value="${esc(name)}"></label>
-        <button class="btn primary" id="go-create">Create a game</button>
-        <div class="or">or join a friend's game</div>
-        <div class="joinrow"><input id="code" maxlength="5" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="CODE" value="${code}" aria-label="Game code"><button class="btn" id="go-join">Join</button></div>
-        <p class="hint">Up to ${MAX_PLAYERS} players. Play together against AgroCorp, or race each other.</p>`
-        : `<p class="hint">Online play works from the hosted game link, not this preview. Ask Damian for the link.</p>`}
-      </div>
-      <p class="credit">Parish borders: geoBoundaries / Wikimedia Commons, CC BY 2.5.</p>`;
-    this.card().querySelectorAll<HTMLButtonElement>('.mtab').forEach((t) => t.onclick = () => {
-      this.card().querySelectorAll<HTMLButtonElement>('.mtab').forEach((o) => o.classList.toggle('on', o === t));
-      this.card().querySelectorAll<HTMLElement>('.mpane').forEach((p) => (p.hidden = p.dataset.pane !== t.dataset.tab));
-    });
-    this.bindSeg('#difficulty', (v) => (this.difficulty = v as Difficulty));
+    // the start screen is the poster itself: pick solo or online, then the few settings that go with it
+    this.poster(false);
+    this.card().classList.add('home');
+    const diffHint = (d: string) => DIFF_OPTS.find(([v]) => v === d)![2];
+    this.card().innerHTML = `
+      <div class="hposter" role="img" aria-label="Barbados: heroes of the island's history and today"><div class="presents">Damian Grows presents</div></div>
+      <div class="hbottom">
+        <h1 class="ptitle">Grow the Island</h1>
+        ${note ? `<p class="note">${esc(note)}</p>` : ''}
+        <div class="hstep" data-step="pick">
+          <div class="pick2">
+            <button class="btn primary" data-go="solo">Play solo</button>
+            <button class="btn gold-ghost" data-go="online">Play online</button>
+          </div>
+          <div class="hlinks"><button class="linkbtn" data-go="how">How to play</button></div>
+        </div>
+        <div class="hstep" data-step="solo" hidden>
+          <div class="diffrow"><span class="kicker">AgroCorp</span>${seg('difficulty', DIFF_SMALL, this.difficulty)}</div>
+          <p class="hint" id="diff-hint">${esc(diffHint(this.difficulty))}</p>
+          <button class="btn primary" id="go-solo">Start growing</button>
+          <div class="hlinks"><button class="linkbtn" data-go="pick">Back</button></div>
+        </div>
+        <div class="hstep" data-step="online" hidden>
+          ${ONLINE ? `
+          <label class="field" for="nm">Your name<input id="nm" maxlength="16" autocomplete="nickname" placeholder="e.g. Damian" value="${esc(name)}"></label>
+          <button class="btn primary" id="go-create">Create a game</button>
+          <div class="or">or join a friend's game</div>
+          <div class="joinrow"><input id="code" maxlength="5" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="CODE" value="${code}" aria-label="Game code"><button class="btn" id="go-join">Join</button></div>
+          <p class="hint">Up to ${MAX_PLAYERS} players. Play together against AgroCorp, or race each other.</p>`
+          : `<p class="hint">Online play works from the hosted game link, not this preview. Ask Damian for the link.</p>`}
+          <div class="hlinks"><button class="linkbtn" data-go="pick">Back</button></div>
+        </div>
+        <div class="hstep how" data-step="how" hidden>
+          <p class="sub">Grow food for Barbados. Feed <strong>6 of the 11 parishes</strong> and grow through five ages to the <strong>Co-op Age</strong> before AgroCorp buys up the island.</p>
+          <ul>
+            <li><strong>Tap a worker</strong>, then tap breadfruit, coral stone, a spring or flying fish to gather.</li>
+            <li><strong>Build</strong> houses, farms, roads and seawalls; trade at the port and airport.</li>
+            <li><strong>Tap a parish</strong> next to yours to feed it and win it over.</li>
+            <li><strong>Money (BBD)</strong> comes from co-op dues in every parish you feed, and from selling food.</li>
+            <li>Drag to pan. Pinch or scroll to zoom.</li>
+          </ul>
+          <div class="hlinks"><button class="linkbtn" data-go="pick">Back</button></div>
+        </div>
+        <p class="credit">Parish borders: geoBoundaries / Wikimedia Commons, CC BY 2.5.</p>
+      </div>`;
+    const go = (step: string) => {
+      this.card().querySelectorAll<HTMLElement>('.hstep').forEach((el) => (el.hidden = el.dataset.step !== step));
+      this.card().classList.toggle('open', step !== 'pick');
+    };
+    this.card().querySelectorAll<HTMLButtonElement>('[data-go]').forEach((b) => (b.onclick = () => go(b.dataset.go!)));
+    this.bindSeg('#difficulty', (v) => { this.difficulty = v as Difficulty; $('#diff-hint').textContent = diffHint(v); });
     $('#go-solo').onclick = () => this.a.solo(this.difficulty);
     if (ONLINE) {
       const nm = () => { const v = $<HTMLInputElement>('#nm').value.trim(); if (v) store.set('bim:name', v); return v || 'Player'; };
@@ -96,13 +113,21 @@ export class Menu {
       };
       $('#go-join').onclick = join;
       $<HTMLInputElement>('#code').onkeydown = (e) => { if (e.key === 'Enter') join(); };
+      if (code) go('online');
     }
+  }
+
+  /** Puts the poster behind the menu; `dim` darkens it under the lobby and invite cards so their text stays readable. */
+  private poster(dim: boolean) {
+    const o = $('#overlay'); o.classList.add('poster'); o.classList.toggle('dim', dim); o.classList.toggle('bare', !dim);
+    this.card().classList.remove('home', 'open');
   }
 
   /** Set when someone opened an invite link but chose to play solo instead. */
   private soloInstead = false;
   /** Opened from an invite link: one clear job, joining that game. */
   private invite(code: string, name: string, note?: string) {
+    this.poster(true);
     this.card().innerHTML = `<div class="flag"><i></i><i></i><i></i></div>
       <div class="kicker">You're invited to</div>
       <h1>Bim: Grow the Island</h1>
@@ -124,10 +149,10 @@ export class Menu {
     $('#go-solo-instead').onclick = () => { this.soloInstead = true; history.replaceState(null, '', location.pathname); this.home(); };
   }
 
-  waiting(msg: string) { this.show(); this.card().innerHTML = `<div class="flag"><i></i><i></i><i></i></div><h1 style="font-size:28px">${esc(msg)}</h1><p class="sub">The server may take up to a minute to wake up the first time.</p><button class="btn" id="m-back">Back</button>`; $('#m-back').onclick = () => { this.a.leave(); this.home(); }; }
+  waiting(msg: string) { this.show(); this.poster(true); this.card().innerHTML = `<div class="flag"><i></i><i></i><i></i></div><h1 style="font-size:28px">${esc(msg)}</h1><p class="sub">The server may take up to a minute to wake up the first time.</p><button class="btn" id="m-back">Back</button>`; $('#m-back').onclick = () => { this.a.leave(); this.home(); }; }
 
   lobby(l: LobbyInfo, mySlot: number) {
-    this.show();
+    this.show(); this.poster(true);
     const host = l.host === mySlot;
     const link = `${location.origin}${location.pathname}?room=${l.code}`;
     const canShare = typeof navigator.share === 'function';
@@ -150,7 +175,7 @@ export class Menu {
       <p class="hint">Send the invite. Your friends tap the link and press <strong>Join the game</strong>, or open the game, tap Play online and type the code.</p>
       <ul class="seats">${seats}</ul>
       ${host ? `<div class="kicker">Mode</div>${seg('mode', [['coop', 'Co-op', 'Together vs AgroCorp'], ['versus', 'Versus', 'Race each other']], l.mode)}
-        <div class="kicker">AgroCorp difficulty</div>${seg('ldiff', DIFF_OPTS, l.difficulty)}
+        <div class="kicker">AgroCorp difficulty</div>${seg('ldiff', DIFF_SMALL, l.difficulty).replace('class="seg"', 'class="seg small"')}
         <button class="btn primary" id="m-start"${(l.mode === 'versus' && l.players.length < 2) || away.length ? ' disabled' : ''}>${away.length ? `Waiting for ${esc(away.join(' and '))} to come back…` : 'Start the game'}</button>`
         : `<p class="sub"><strong>${modeName}</strong> · AgroCorp ${DIFFICULTY[l.difficulty].label}. Waiting for the host to start…</p>`}
       <button class="btn ghost" id="m-leave">Leave</button>`;
