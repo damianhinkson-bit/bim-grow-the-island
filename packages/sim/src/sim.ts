@@ -1,5 +1,5 @@
 import {
-  AGE_COST, AGE_T, AGRO, AGRO_HOME, BOAT_COST, BOAT_RATE, BT, CARRY, DEALS, DIFFICULTY, DT, DUES, EAT, FEE, MAX_BOATS, RELIEF, RES, ROAD_COST, TOURISM, H, HNAMES, STALL, MAX_PLAYERS, NT, PLAYER_COLORS, SEA_R, SPEED, START_PARISHES, START_RES,
+  AGES, AGRO, COMPOST_BONUS, COMPOST_R, HUB_DUES, MAX_AGE, WINDBREAK_R, AGRO_HOME, BOAT_COST, BOAT_RATE, BT, CARRY, DEALS, DIFFICULTY, DT, DUES, EAT, FEE, MAX_BOATS, RELIEF, RES, ROAD_COST, TOURISM, H, HNAMES, STALL, MAX_PLAYERS, NT, PLAYER_COLORS, SEA_R, SPEED, START_PARISHES, START_RES,
   TRAIN, TRAIN_COST, W, WIN_N, canAfford, fmtCost, pay,
   type BType, type DealId, type Difficulty, type Landmark, type NodeType, type Res,
 } from './defs';
@@ -201,8 +201,16 @@ export function popCap(s: State, owner: string): number {
 }
 export function protectedB(s: State, b: Building): boolean {
   const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
-  return Object.values(s.buildings).some((w) => w.type === 'seawall' && w.done && Math.hypot(w.x + 0.5 - cx, w.y + 0.5 - cy) <= SEA_R);
+  return Object.values(s.buildings).some((w) => w.done && w !== b && (
+    (w.type === 'seawall' && Math.hypot(w.x + 0.5 - cx, w.y + 0.5 - cy) <= SEA_R) ||
+    (w.type === 'windbreak' && Math.hypot(w.x + 0.5 - cx, w.y + 0.5 - cy) <= WINDBREAK_R)));
 }
+/** Whether a farm plot has a composter of its owner within reach. */
+export function composted(s: State, b: Building): boolean {
+  return Object.values(s.buildings).some((o) => o.type === 'composter' && o.done && o.owner === b.owner && Math.hypot(o.x - b.x, o.y - b.y) <= COMPOST_R);
+}
+/** Which player built a road tile (null for highways and empty tiles). */
+export function roadOwner(s: State, i: number): Player | null { const v = s.roads[i]; return v >= 2 ? s.players[v - 2] ?? null : null; }
 export function aquaPowered(s: State, b: Building): boolean {
   return Object.values(s.buildings).some((o) => o.type === 'solar' && o.done && o.owner === b.owner && Math.hypot(o.x - b.x, o.y - b.y) <= SEA_R);
 }
@@ -270,7 +278,7 @@ export function claimBlock(s: State, pid: string, p: Parish): string | null {
 export function placeBlock(s: State, pid: string, type: BType, x: number, y: number): string | null {
   const d = BT[type], me = player(s, pid);
   if (!me) return 'Unknown player.';
-  if ((d.age ?? 1) > me.age) return `${d.name} unlocks in the Co-op Age.`;
+  if ((d.age ?? 1) > me.age) return `${d.name} unlocks in the ${AGES[(d.age ?? 1) - 1].name}.`;
   for (let dy = 0; dy < d.h; dy++) for (let dx = 0; dx < d.w; dx++) {
     const tx = x + dx, ty = y + dy;
     if (!inB(tx, ty)) return 'That is out at sea.';
@@ -364,10 +372,20 @@ function updWorker(s: State, w: Worker, dt: number) {
     type = NT[n.type].res; rate = NT[n.type].rate * (n.type === 'spring' && drought(s) ? 0.5 : 1); goal = rectOf(n);
   } else {
     const b = s.buildings[t.b]; if (!b || !b.done) { setIdle(s, w); return; }
-    type = 'food'; rate = 0.85 * (b.pest > 0 ? 0.35 : 1); goal = rectOf(b);
+    type = 'food'; rate = 0.85 * (b.pest > 0 ? 0.35 : 1) * (composted(s, b) ? COMPOST_BONUS : 1); goal = rectOf(b);
   }
   if (w.phase === 'to') {
-    if (!w.path && !goTo(s, w, goal)) { setIdle(s, w); return; }
+    if (!w.path && !goTo(s, w, goal)) {
+      // boxed in by other trees or rocks: try the nearest reachable resource of the same kind
+      if (t.k === 'gather') {
+        const type0 = s.nodes[t.n].type;
+        const alts = s.nodes.filter((n) => n.type === type0 && n.amt > 0 && n.id !== t.n)
+          .sort((a, z) => Math.hypot(a.x - w.x, a.y - w.y) - Math.hypot(z.x - w.x, z.y - w.y)).slice(0, 6);
+        const alt = alts.find((n) => goTo(s, w, rectOf(n)));
+        if (alt) { t.n = alt.id; return; }
+      }
+      setIdle(s, w); return;
+    }
     const r = follow(s, w, dt); if (r === 'arrived') w.phase = 'work'; else if (r === 'blocked') setIdle(s, w); return;
   }
   if (w.phase === 'work') {
@@ -406,9 +424,11 @@ export function step(s: State): void {
     }
     if (p.ageT >= 0) {
       p.ageT += dt;
-      if (p.ageT >= AGE_T) { p.ageT = -1; p.age = 2; emit(s, 'good', 'Co-op Age reached. Aquaponics and solar unlocked.', p.id); }
+      const next = AGES[p.age];
+      if (next && p.ageT >= next.time) { p.ageT = -1; p.age++; emit(s, 'good', `${next.name} reached. ${next.unlocks}`, p.id); }
     }
-    const dues = DUES * owned(s, p.id) * dt; p.res.bbd += dues; p.flow.gain.bbd += dues;
+    const hub = Object.values(s.buildings).some((b) => b.owner === p.id && b.type === 'hub' && b.done);
+    const dues = DUES * owned(s, p.id) * (hub ? HUB_DUES : 1) * dt; p.res.bbd += dues; p.flow.gain.bbd += dues;
     if (p.boats && s.weather.stormT <= 0) { const f = p.boats * BOAT_RATE * dt; p.res.food += f; p.flow.gain.food += f; p.stats.food += f; }
     if (landmarkHolder(s, 'airport') === p.id && airportOpen(s)) { const t = TOURISM * dt; p.res.bbd += t; p.flow.gain.bbd += t; }
     // everyone eats; an empty stockpile means hungry workers at half speed
@@ -461,7 +481,7 @@ function landfall(s: State) {
     if (!b.done) { if (!prot && rand(s) < 0.5) { removeBuilding(s, b); L(); } continue; }
     if (b.type === 'tc') { if (!prot) { b.hp = Math.max(1, b.hp - b.maxHp * 0.3); D(); } continue; }
     let hit = false;
-    if (b.type === 'seawall') b.hp -= b.maxHp * 0.15;
+    if (b.type === 'seawall' || b.type === 'windbreak') b.hp -= b.maxHp * 0.15;
     else if (prot) { if (rand(s) < 0.15) { b.hp -= b.maxHp * 0.2; hit = true; } }
     else if (rand(s) < 0.7) { b.hp -= b.maxHp * (0.5 + rand(s) * 0.4); hit = true; }
     if (b.hp <= 0) { removeBuilding(s, b); L(); } else if (hit) D();
@@ -530,10 +550,10 @@ export function winTarget(s: State) { return s.mode === 'versus' && s.players.le
 function checkEnd(s: State) {
   if (s.ended) return;
   if (s.mode === 'coop') {
-    if (teamOwned(s, 0) >= WIN_N && s.players.some((p) => p.age >= 2)) { s.ended = { winners: s.players.map((p) => p.id), reason: 'food-secure' }; return; }
+    if (teamOwned(s, 0) >= WIN_N && s.players.some((p) => p.age >= MAX_AGE)) { s.ended = { winners: s.players.map((p) => p.id), reason: 'food-secure' }; return; }
   } else {
     const t = winTarget(s);
-    const w = s.players.find((p) => owned(s, p.id) >= t && p.age >= 2);
+    const w = s.players.find((p) => owned(s, p.id) >= t && p.age >= MAX_AGE);
     if (w) { s.ended = { winners: [w.id], reason: 'food-secure' }; return; }
   }
   if (owned(s, AGRO) >= WIN_N) s.ended = { winners: [AGRO], reason: 'bought-out' };
@@ -606,9 +626,11 @@ export function applyCommand(s: State, pid: string, c: Command): CmdResult {
       spend(me, TRAIN_COST); b.queue++; return { ok: true };
     }
     case 'age': {
-      if (me.age >= 2 || me.ageT >= 0) return fail('Already advancing.');
-      if (!canAfford(me.res, AGE_COST)) return fail(`The Co-op Age needs ${fmtCost(AGE_COST)}.`);
-      spend(me, AGE_COST); me.ageT = 0; emit(s, 'info', 'Your co-op is organising. Co-op Age in 40s.', pid); return { ok: true };
+      if (me.age >= MAX_AGE) return fail('You are already in the final age.');
+      if (me.ageT >= 0) return fail('Already advancing.');
+      const next = AGES[me.age];
+      if (!canAfford(me.res, next.cost)) return fail(`The ${next.name} needs ${fmtCost(next.cost)}.`);
+      spend(me, next.cost); me.ageT = 0; emit(s, 'info', `Your co-op is moving into the ${next.name}. Ready in ${next.time}s.`, pid); return { ok: true };
     }
     case 'market': {
       if (c.trade === 'stall-food') {
@@ -637,7 +659,7 @@ export function applyCommand(s: State, pid: string, c: Command): CmdResult {
         if (s.roads[i]) continue;
         if (s.nodeAt[i] >= 0 || s.bAt[i] >= 0) { why ||= 'Something is in the way.'; continue; }
         if (me.res.stone < ROAD_COST) { why = `Out of stone: each road tile costs ${ROAD_COST}.`; break; }
-        spend(me, { stone: ROAD_COST }); s.roads[i] = 2; laid++;
+        spend(me, { stone: ROAD_COST }); s.roads[i] = 2 + s.players.indexOf(me); laid++;
       }
       if (laid) s.roadVersion++;
       return laid ? { ok: true, msg: why || undefined } : fail(why || 'Nothing to build there.');

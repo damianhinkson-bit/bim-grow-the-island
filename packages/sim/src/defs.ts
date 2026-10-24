@@ -2,7 +2,7 @@
 export const W = 52, H = 66;
 /** Simulation step in seconds. The sim always advances in fixed steps so every machine computes the same game. */
 export const DT = 0.1;
-export const CARRY = 10, SPEED = 2.4, TRAIN = 12, AGE_T = 40, SEA_R = 5, WIN_N = 6, MAX_PLAYERS = 4;
+export const CARRY = 10, SPEED = 2.4, TRAIN = 12, SEA_R = 5, WIN_N = 6, MAX_PLAYERS = 4;
 
 export type Res = 'food' | 'water' | 'stone' | 'bbd';
 export const RES: Res[] = ['food', 'water', 'stone', 'bbd'];
@@ -16,24 +16,40 @@ export const NT: Record<NodeType, { label: string; res: Res; rate: number; max: 
   spring: { label: 'Spring', res: 'water', rate: 1, max: Number.POSITIVE_INFINITY },
 };
 
-export type BType = 'tc' | 'house' | 'farm' | 'depot' | 'cistern' | 'seawall' | 'market' | 'aqua' | 'solar' | 'hq' | 'port' | 'airport';
+export type BType = 'tc' | 'house' | 'farm' | 'depot' | 'cistern' | 'seawall' | 'market' | 'composter' | 'windbreak' | 'aqua' | 'solar' | 'hub' | 'hq' | 'port' | 'airport';
 export interface BDef { name: string; w: number; h: number; cost: Cost; hp: number; pop?: number; drop?: boolean; coast?: boolean; age?: number; build: number; desc: string; landmark?: boolean }
 export const BT: Record<BType, BDef> = {
   tc: { name: 'Town Centre', w: 2, h: 2, cost: {}, hp: 1200, pop: 5, drop: true, build: 1, desc: 'Trains workers and takes drop-offs. Advance your age here.' },
   house: { name: 'Chattel House', w: 1, h: 1, cost: { stone: 40 }, hp: 200, pop: 5, build: 10, desc: '+5 population.' },
-  farm: { name: 'Farm Plot', w: 1, h: 1, cost: { stone: 50 }, hp: 150, build: 10, desc: 'One worker grows food here forever. Uses a little water.' },
+  farm: { name: 'Farm Plot', w: 1, h: 1, age: 2, cost: { stone: 50 }, hp: 150, build: 10, desc: 'One worker grows food here forever. Uses a little water.' },
   depot: { name: 'Co-op Depot', w: 1, h: 1, cost: { stone: 60 }, hp: 300, drop: true, build: 14, desc: 'Workers drop off resources here, so trips are shorter.' },
-  cistern: { name: 'Cistern', w: 1, h: 1, cost: { stone: 50, bbd: 20 }, hp: 250, build: 12, desc: 'Catches rain: +0.5 water/s. Dry in a drought.' },
-  seawall: { name: 'Seawall', w: 1, h: 1, cost: { stone: 80 }, hp: 600, coast: true, build: 16, desc: 'Shields buildings within 5 tiles from hurricanes. Coast tiles only.' },
-  market: { name: 'Market', w: 1, h: 1, cost: { stone: 80 }, hp: 350, build: 18, desc: 'Sell surplus food and stone at the best prices, or truck in water.' },
-  aqua: { name: 'Aquaponics', w: 1, h: 1, age: 2, cost: { stone: 120, bbd: 80 }, hp: 300, build: 22, desc: 'Fish and greens together: +2 food/s, uses 0.5 water/s. Half speed without solar nearby.' },
-  solar: { name: 'Solar Array', w: 1, h: 1, age: 2, cost: { stone: 60, bbd: 100 }, hp: 200, build: 14, desc: 'Powers aquaponics within 5 tiles.' },
+  cistern: { name: 'Cistern', w: 1, h: 1, age: 2, cost: { stone: 50, bbd: 20 }, hp: 250, build: 12, desc: 'Catches rain: +0.5 water/s. Dry in a drought.' },
+  seawall: { name: 'Seawall', w: 1, h: 1, age: 2, cost: { stone: 80 }, hp: 600, coast: true, build: 16, desc: 'Shields buildings within 5 tiles from hurricanes. Coast tiles only.' },
+  market: { name: 'Market', w: 1, h: 1, age: 2, cost: { stone: 80 }, hp: 350, build: 18, desc: 'Sell surplus food and stone at the best prices, or truck in water.' },
+  aqua: { name: 'Aquaponics', w: 1, h: 1, age: 4, cost: { stone: 120, bbd: 80 }, hp: 300, build: 22, desc: 'Fish and greens together: +2 food/s, uses 0.5 water/s. Half speed without solar nearby.' },
+  solar: { name: 'Solar Array', w: 1, h: 1, age: 4, cost: { stone: 60, bbd: 100 }, hp: 200, build: 14, desc: 'Powers aquaponics within 5 tiles.' },
+  composter: { name: 'Composter', w: 1, h: 1, age: 3, cost: { stone: 40, bbd: 20 }, hp: 150, build: 10, desc: 'Turns crop waste into compost. Farm plots within 3 tiles grow 40% faster.' },
+  windbreak: { name: 'Windbreak', w: 1, h: 1, age: 3, cost: { stone: 20, food: 30 }, hp: 250, build: 12, desc: 'A row of trees and bamboo. Shields buildings within 3 tiles from hurricanes, anywhere inland.' },
+  hub: { name: 'Co-op Hub', w: 1, h: 1, age: 5, cost: { stone: 150, bbd: 150 }, hp: 500, drop: true, build: 24, desc: 'The co-op\'s distribution centre. Takes drop-offs and raises your co-op dues by half.' },
   hq: { name: 'AgroCorp HQ', w: 2, h: 2, cost: {}, hp: 9999, build: 1, desc: '' },
   port: { name: 'Bridgetown Port', w: 2, h: 2, cost: {}, hp: 9999, build: 1, landmark: true, desc: 'Ships export your surplus and bring in supplies. Fishing boats sail from here.' },
   airport: { name: 'Grantley Adams Airport', w: 2, h: 2, cost: {}, hp: 9999, build: 1, landmark: true, desc: 'Air freight pays top prices for fresh food. Tourists bring income to whoever holds Christ Church.' },
 };
-export const BUILD_LIST: BType[] = ['house', 'farm', 'depot', 'cistern', 'seawall', 'market', 'aqua', 'solar'];
-export const AGE_COST: Cost = { food: 400, water: 150, stone: 200, bbd: 150 };
+export const BUILD_LIST: BType[] = ['house', 'depot', 'farm', 'cistern', 'market', 'seawall', 'composter', 'windbreak', 'aqua', 'solar', 'hub'];
+/**
+ * The five ages. cost/time are what it takes to advance INTO that age (age 1 is where everyone starts).
+ * Reaching the Co-op Age is required to win.
+ */
+export const AGES: { name: string; short: string; cost: Cost; time: number; unlocks: string }[] = [
+  { name: 'Foraging Age', short: 'Foraging', cost: {}, time: 0, unlocks: 'Gathering, huts and depots.' },
+  { name: 'Rain-fed Farming Age', short: 'Farming', cost: { food: 150, stone: 50 }, time: 20, unlocks: 'Farm plots, cisterns, the market and seawalls.' },
+  { name: 'Recovery Age', short: 'Recovery', cost: { food: 300, water: 100, stone: 150, bbd: 80 }, time: 30, unlocks: 'Composters and windbreaks to repair worn-out land.' },
+  { name: 'Sustainable Tech Age', short: 'Sustainable Tech', cost: { food: 400, water: 150, stone: 200, bbd: 150 }, time: 40, unlocks: 'Aquaponics and solar power.' },
+  { name: 'Co-op Age', short: 'Co-op', cost: { food: 600, water: 200, stone: 300, bbd: 300 }, time: 50, unlocks: 'The Co-op Hub. Reaching this age is needed to win.' },
+];
+export const MAX_AGE = AGES.length;
+/** Windbreak shield radius and composter reach, in tiles. */
+export const WINDBREAK_R = 3, COMPOST_R = 3, COMPOST_BONUS = 1.4, HUB_DUES = 1.5;
 export const TRAIN_COST: Cost = { food: 50 };
 export const START_RES: Record<Res, number> = { food: 200, water: 100, stone: 120, bbd: 100 };
 /** Food each worker eats per second (6 a minute). */

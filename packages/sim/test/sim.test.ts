@@ -7,8 +7,9 @@ function bot(s: State, pid: string): Command[] {
   if (s.tick % 10 !== 0) return out;
   const ws = workersOf(s, pid), tc = tcOf(s, pid)!;
   const me = s.players.find((p) => p.id === pid)!;
-  ws.filter((w) => !w.task).forEach((w, k) => {
-    const type = k % 3 === 0 ? 'rock' : k % 3 === 1 ? 'tree' : 'spring';
+  ws.filter((w) => !w.task).forEach((w) => {
+    // each worker keeps a fixed job: two in three on food
+    const type = w.id % 3 === 0 ? 'rock' : 'tree';
     const n = s.nodes.filter((n) => n.type === type && n.amt > 0).sort((a, b) => Math.hypot(a.x - w.x, a.y - w.y) - Math.hypot(b.x - w.x, b.y - w.y))[0];
     if (n) out.push({ type: 'gather', workers: [w.id], node: n.id });
   });
@@ -155,5 +156,34 @@ describe('roads, port and airport', () => {
     expect(s.players[0].flow.gain.food - f0).toBeGreaterThan(3);
     s.weather.stormT = 3;
     expect(applyCommand(s, 'p1', { type: 'trade', at: 'airport', deal: 'airfreight' }).ok).toBe(false);
+  });
+});
+
+describe('five ages', () => {
+  it('starts in the Foraging Age with farms locked, and climbs through all five ages', () => {
+    const s = createGame({ players: [{ name: 'A' }] });
+    const me = s.players[0];
+    expect(me.age).toBe(1);
+    const free = s.parishes[P.MICHAEL].tiles.find((i) => !s.roads[i] && s.nodeAt[i] < 0 && s.bAt[i] < 0)!;
+    expect(applyCommand(s, 'p1', { type: 'place', building: 'farm', x: free % W, y: (free / W) | 0, workers: [] }).msg).toContain('Rain-fed Farming Age');
+    for (let age = 2; age <= 5; age++) {
+      me.res = { food: 9999, water: 9999, stone: 9999, bbd: 9999 };
+      expect(applyCommand(s, 'p1', { type: 'age' }).ok).toBe(true);
+      let t = 0; while (me.age < age && t < 1000) { step(s); t++; }
+      expect(me.age).toBe(age);
+    }
+    expect(applyCommand(s, 'p1', { type: 'age' }).ok).toBe(false);
+  });
+  it('makes composted farms grow faster and windbreaks shield buildings', async () => {
+    const { composted, protectedB, addBuilding } = await import('../src');
+    const s = createGame({ players: [{ name: 'A' }] });
+    const farm = addBuilding(s, 'farm', 10, 40, 'p1', true);
+    expect(composted(s, farm)).toBe(false);
+    addBuilding(s, 'composter', 12, 40, 'p1', true);
+    expect(composted(s, farm)).toBe(true);
+    const house = addBuilding(s, 'house', 30, 30, 'p1', true);
+    expect(protectedB(s, house)).toBe(false);
+    addBuilding(s, 'windbreak', 32, 31, 'p1', true);
+    expect(protectedB(s, house)).toBe(true);
   });
 });
