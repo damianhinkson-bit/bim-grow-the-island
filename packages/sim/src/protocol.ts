@@ -7,7 +7,7 @@ import type { Mode } from './types';
  * Online games run in lockstep: the server gathers every player's commands for a tick, applies them to its own copy,
  * steps it, and broadcasts the same commands to every phone, which does exactly the same. 10 ticks per second.
  */
-export const PROTOCOL = 2;
+export const PROTOCOL = 3;
 export const CODE_LEN = 5;
 
 /**

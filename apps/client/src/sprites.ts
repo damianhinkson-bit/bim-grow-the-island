@@ -77,33 +77,65 @@ function drawTC(g: CanvasRenderingContext2D, w: number, h: number, age: number) 
   }
   flag(g, w);
 }
-function drawHouse(g: CanvasRenderingContext2D, variant: number, age: number) {
-  if (age <= 1) {
-    // thatch hut
+/** The five kinds of house, by level: thatch hut, chattel house, coral stone house, townhouse, apartment block. */
+function drawHouse(g: CanvasRenderingContext2D, variant: number, lvl: number) {
+  const pastel = HOUSE_COL[variant % HOUSE_COL.length];
+  const shadow = (w: number) => { g.fillStyle = 'rgba(0,0,0,.18)'; ellipse(g, 12, 21.5, w, 2); };
+  const garden = (x: number) => { // kitchen garden beside the house
+    g.fillStyle = '#6B4A2B'; g.fillRect(x, 17, 4, 4.5);
+    g.fillStyle = '#6CC24A'; for (const [a, b] of [[1, 18], [3, 18.6], [1.6, 20.4], [3.2, 20.6]]) circle(g, x + a, b, 0.95);
+  };
+  if (lvl <= 1) {
+    shadow(9);
     g.fillStyle = '#9C6B3C'; g.fillRect(6, 12, 12, 9);
     g.fillStyle = '#D9B66A'; g.beginPath(); g.moveTo(3, 14); g.lineTo(12, 3); g.lineTo(21, 14); g.closePath(); g.fill();
     g.strokeStyle = '#B8934A'; g.lineWidth = 0.8; for (let k = 0; k < 4; k++) { g.beginPath(); g.moveTo(6 + k * 4, 13); g.lineTo(11 + k * 0.6, 5); g.stroke(); }
     g.fillStyle = '#3A2A1A'; g.fillRect(10, 16, 4, 5); return;
   }
-  const pastel = HOUSE_COL[variant % HOUSE_COL.length];
-  if (age >= 5) {
-    // two-storey chattel house with a veranda
-    g.fillStyle = pastel; g.fillRect(5, 6, 14, 15);
-    g.fillStyle = '#7A3B2E'; g.beginPath(); g.moveTo(3, 7); g.lineTo(12, 0.5); g.lineTo(21, 7); g.closePath(); g.fill();
-    g.fillStyle = '#FFF7E0'; g.fillRect(7, 9, 2.5, 2.5); g.fillRect(14.5, 9, 2.5, 2.5);
-    g.fillStyle = '#FFFFFF'; g.fillRect(3, 14, 18, 1.4); for (let k = 0; k < 5; k++) g.fillRect(3.5 + k * 4.2, 14, 0.9, 7);
-    g.fillStyle = '#5A3A22'; g.fillRect(10, 16, 4, 5);
+  if (lvl === 2) {
+    // chattel house: painted clapboard on blocks, steep galvanised roof, gingerbread trim and a kitchen garden
+    shadow(9);
+    g.fillStyle = '#8C8478'; g.fillRect(4.5, 20, 2, 1.5); g.fillRect(15.5, 20, 2, 1.5);          // coral blocks
+    g.fillStyle = pastel; g.fillRect(4, 11, 14, 9);
+    g.strokeStyle = 'rgba(0,0,0,.14)'; g.lineWidth = 0.6; for (let k = 0; k < 3; k++) { g.beginPath(); g.moveTo(4, 13.4 + k * 2.4); g.lineTo(18, 13.4 + k * 2.4); g.stroke(); }
+    g.fillStyle = '#A9B3BC'; g.beginPath(); g.moveTo(2, 11.5); g.lineTo(11, 2.5); g.lineTo(20, 11.5); g.closePath(); g.fill();
+    g.strokeStyle = 'rgba(0,0,0,.18)'; g.lineWidth = 0.5; for (let k = 0; k < 5; k++) { g.beginPath(); g.moveTo(4 + k * 3.5, 11.2); g.lineTo(11, 3.4); g.stroke(); }
+    g.fillStyle = '#FFFFFF'; for (let k = 0; k < 6; k++) circle(g, 4.6 + k * 2.6, 11.6, 0.7);           // gingerbread trim
+    g.fillStyle = '#4A6FA5'; g.fillRect(9, 14.5, 3.6, 5.5);                                          // jalousie door
+    g.fillStyle = '#FFF7E0'; g.fillRect(5.5, 13.5, 2.4, 2.4); g.fillRect(14.2, 13.5, 2.4, 2.4);
+    garden(19); return;
+  }
+  if (lvl === 3) {
+    // coral stone house: cut-stone walls, hipped red roof
+    shadow(10);
+    g.fillStyle = '#EADBB8'; g.fillRect(3.5, 10, 17, 11);
+    g.strokeStyle = 'rgba(120,96,60,.35)'; g.lineWidth = 0.5;
+    for (let r = 0; r < 4; r++) { const y = 12 + r * 2.6; g.beginPath(); g.moveTo(3.5, y); g.lineTo(20.5, y); g.stroke(); for (let c = 0; c < 4; c++) { const x = 5 + c * 4.4 + (r % 2) * 2.2; g.beginPath(); g.moveTo(x, y - 2.6); g.lineTo(x, y); g.stroke(); } }
+    g.fillStyle = '#B5482E'; g.beginPath(); g.moveTo(2, 10.5); g.lineTo(7, 3.5); g.lineTo(17, 3.5); g.lineTo(22, 10.5); g.closePath(); g.fill();
+    g.fillStyle = 'rgba(0,0,0,.15)'; g.beginPath(); g.moveTo(17, 3.5); g.lineTo(22, 10.5); g.lineTo(18, 10.5); g.closePath(); g.fill();
+    g.fillStyle = '#5A3A22'; g.fillRect(10, 15, 4, 6);
+    g.fillStyle = '#2E5A7A'; g.fillRect(5.5, 13.5, 2.6, 3); g.fillRect(15.9, 13.5, 2.6, 3);
     return;
   }
-  const walls = age === 2 ? '#B98D5E' : pastel, roof = age === 2 ? '#9AA3AB' : '#7A3B2E';
-  g.fillStyle = walls; g.fillRect(5, 11, 14, 10);
-  if (age === 2) { g.strokeStyle = '#9C7347'; g.lineWidth = 0.7; for (let k = 0; k < 3; k++) { g.beginPath(); g.moveTo(5, 13.5 + k * 2.8); g.lineTo(19, 13.5 + k * 2.8); g.stroke(); } }
-  g.fillStyle = roof; g.beginPath(); g.moveTo(3, 12); g.lineTo(12, 3); g.lineTo(21, 12); g.closePath(); g.fill();
-  if (age === 2) { g.strokeStyle = 'rgba(0,0,0,.2)'; g.lineWidth = 0.6; for (let k = 0; k < 5; k++) { g.beginPath(); g.moveTo(5 + k * 3.5, 11.5); g.lineTo(12, 4); g.stroke(); } }
-  else { g.fillStyle = '#FFFFFF'; g.fillRect(5, 11, 14, 1.5); }
-  g.fillStyle = '#5A3A22'; g.fillRect(10, 15, 4, 6);
-  g.fillStyle = '#FFF7E0'; g.fillRect(15.5, 14, 2.5, 2.5); g.fillRect(6, 14, 2.5, 2.5);
-  if (age >= 4) { solarRoof(g, 13, 6.5, 1); g.fillStyle = '#3E8FB8'; g.fillRect(19.5, 15, 3, 6); g.fillStyle = '#5BC0EB'; g.fillRect(19.5, 15, 3, 1.2); }
+  if (lvl === 4) {
+    // townhouse: two storeys, balcony, solar and greens on the roof
+    shadow(10);
+    g.fillStyle = pastel; g.fillRect(4, 6, 16, 15);
+    g.fillStyle = '#E9E4D6'; g.fillRect(3.5, 5, 17, 1.6);
+    solarRoof(g, 8, 3.4, 0.8);
+    g.fillStyle = '#4E9A3A'; for (const x of [15, 17, 19]) circle(g, x, 4, 1.2);
+    g.fillStyle = '#FFF7E0'; for (const [x, y] of [[6, 8], [11, 8], [16, 8], [6, 14], [16, 14]]) g.fillRect(x, y, 2.6, 2.8);
+    g.fillStyle = '#FFFFFF'; g.fillRect(4, 12, 16, 1); for (let k = 0; k < 5; k++) g.fillRect(4.4 + k * 3.8, 12, 0.7, 2.4);
+    g.fillStyle = '#5A3A22'; g.fillRect(10.5, 16, 3.2, 5);
+    return;
+  }
+  // apartment block: four storeys, a window grid, rooftop garden and solar
+  shadow(11);
+  g.fillStyle = '#E4DCCB'; g.fillRect(3, 3.5, 18, 17.5);
+  g.fillStyle = pastel; g.fillRect(3, 3.5, 3, 17.5); g.fillRect(18, 3.5, 3, 17.5);
+  g.fillStyle = '#3E6E8E'; for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++) g.fillRect(7.2 + c * 3.6, 5 + r * 3.8, 2.4, 2.6);
+  g.fillStyle = '#4E9A3A'; g.fillRect(3, 2, 8, 1.6); solarRoof(g, 15.5, 1.6, 0.6);
+  g.fillStyle = '#5A3A22'; g.fillRect(10.5, 18, 3, 3);
 }
 function drawFarm(g: CanvasRenderingContext2D, age: number) {
   const soil = age === 3 ? '#9C7A45' : '#7A5230';
@@ -246,3 +278,31 @@ export function buildingTex(t: BType, variant: number, opts: { dry?: boolean; fo
   }));
 }
 export const workerTex = (color: string, age = 3) => once(`w:${color}:${age}`, () => make(16, 20, (g) => drawWorker(g, color, age)));
+
+/**
+ * AgroCorp's vehicles, side view facing right (the renderer flips them). 'survey' is the white company pickup that
+ * scouts the parish AgroCorp wants next; 'cane' is a flatbed hauling monoculture cane to the port.
+ */
+export type TruckKind = 'survey' | 'cane';
+export const truckTex = (kind: TruckKind) => once('truck:' + kind, () => make(28, 18, (g) => {
+  g.fillStyle = 'rgba(0,0,0,.22)'; ellipse(g, 14, 16, 12, 2.2);
+  const wheel = (x: number) => { g.fillStyle = '#1B1D22'; circle(g, x, 14, 2.6); g.fillStyle = '#9AA0A8'; circle(g, x, 14, 1); };
+  if (kind === 'survey') {
+    g.fillStyle = '#F4F4F2'; g.beginPath(); g.roundRect(3, 7, 22, 6.5, 1.5); g.fill();          // body
+    g.beginPath(); g.moveTo(12, 7); g.lineTo(14.5, 3); g.lineTo(22, 3); g.lineTo(24.5, 7); g.closePath(); g.fill(); // cab
+    g.fillStyle = '#2B3A4E'; g.beginPath(); g.moveTo(15.2, 6.6); g.lineTo(16.6, 4); g.lineTo(21.4, 4); g.lineTo(23, 6.6); g.closePath(); g.fill();
+    g.fillStyle = '#E2553F'; g.fillRect(3, 9.6, 22, 1.8);                                         // company stripe
+    g.fillStyle = '#FFB000'; g.fillRect(17.5, 1.6, 2.6, 1.4);                                     // roof light
+    g.fillStyle = '#FFE9A8'; g.fillRect(24, 8, 1.2, 1.6);
+  } else {
+    g.fillStyle = '#5A5F66'; g.fillRect(2, 10, 17, 2.2);                                          // flatbed
+    g.fillStyle = '#9BBF3A'; g.beginPath(); g.roundRect(2.5, 4.5, 16, 5.8, 1.2); g.fill();      // cane load
+    g.strokeStyle = '#5E8A22'; g.lineWidth = 0.8;
+    for (const y of [6, 7.6, 9.2]) { g.beginPath(); g.moveTo(3, y); g.lineTo(18, y - 0.4); g.stroke(); }
+    g.strokeStyle = '#C9D97A'; for (const x of [5, 9, 13, 17]) { g.beginPath(); g.moveTo(x, 4.6); g.lineTo(x - 1, 2.6); g.stroke(); }
+    g.fillStyle = '#E2553F'; g.beginPath(); g.roundRect(19, 4, 7, 8.2, 1.5); g.fill();         // red cab
+    g.fillStyle = '#2B3A4E'; g.fillRect(21.6, 5.2, 3.6, 2.8);
+    g.fillStyle = '#FFE9A8'; g.fillRect(25.2, 9, 1, 1.5);
+  }
+  wheel(7); wheel(21);
+}));

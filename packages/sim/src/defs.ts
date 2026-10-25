@@ -17,10 +17,26 @@ export const NT: Record<NodeType, { label: string; res: Res; rate: number; max: 
 };
 
 export type BType = 'tc' | 'house' | 'farm' | 'depot' | 'cistern' | 'seawall' | 'market' | 'composter' | 'windbreak' | 'aqua' | 'solar' | 'hub' | 'hq' | 'port' | 'airport';
+/**
+ * Houses come in five kinds, one per age. A new house is built as the kind of your current age; older houses can be
+ * upgraded one step at a time, each paid for. wind: 0 blows down easily, 1 handles high winds (half the hurricane
+ * damage), 2 hurricane-proof. garden: food per second from the kitchen or rooftop garden.
+ */
+export interface HouseLevel { name: string; pop: number; cost: Cost; hp: number; wind: 0 | 1 | 2; garden: number; about: string }
+export const HOUSES: HouseLevel[] = [
+  { name: 'Thatch Hut', pop: 3, cost: { stone: 25 }, hp: 120, wind: 0, garden: 0, about: 'Wattle walls and a thatch roof. Quick to raise, easy to blow down.' },
+  { name: 'Chattel House', pop: 5, cost: { stone: 40 }, hp: 200, wind: 1, garden: 0.04, about: 'Timber on coral-stone blocks, with a steep roof that rides out high winds.' },
+  { name: 'Coral Stone House', pop: 8, cost: { stone: 70, bbd: 20 }, hp: 400, wind: 2, garden: 0.04, about: 'Thick walls of cut coral stone. Stands up to a hurricane.' },
+  { name: 'Townhouse', pop: 15, cost: { stone: 110, bbd: 50 }, hp: 500, wind: 2, garden: 0.07, about: 'Two storeys of block and steel, with a rooftop garden.' },
+  { name: 'Apartment Block', pop: 25, cost: { stone: 160, bbd: 100 }, hp: 700, wind: 2, garden: 0.12, about: 'Homes for a whole street, solar on the roof and greens growing on top.' },
+];
+/** The most people one co-op can house. */
+export const POP_MAX = 60;
+
 export interface BDef { name: string; w: number; h: number; cost: Cost; hp: number; pop?: number; drop?: boolean; coast?: boolean; age?: number; build: number; desc: string; landmark?: boolean }
 export const BT: Record<BType, BDef> = {
   tc: { name: 'Town Centre', w: 2, h: 2, cost: {}, hp: 1200, pop: 5, drop: true, build: 1, desc: 'Trains workers and takes drop-offs. Advance your age here.' },
-  house: { name: 'Chattel House', w: 1, h: 1, cost: { stone: 40 }, hp: 200, pop: 5, build: 10, desc: '+5 population.' },
+  house: { name: 'House', w: 1, h: 1, cost: { stone: 25 }, hp: 120, pop: 3, build: 10, desc: 'Homes for your workers. Built as the kind of house your age allows, and upgraded as you advance.' },
   farm: { name: 'Farm Plot', w: 1, h: 1, age: 2, cost: { stone: 50 }, hp: 150, build: 10, desc: 'One worker grows food here forever. Uses a little water.' },
   depot: { name: 'Co-op Depot', w: 1, h: 1, cost: { stone: 60 }, hp: 300, drop: true, build: 14, desc: 'Workers drop off resources here, so trips are shorter.' },
   cistern: { name: 'Cistern', w: 1, h: 1, age: 2, cost: { stone: 50, bbd: 20 }, hp: 250, build: 12, desc: 'Catches rain: +0.5 water/s. Dry in a drought.' },
@@ -42,10 +58,10 @@ export const BUILD_LIST: BType[] = ['house', 'depot', 'farm', 'cistern', 'market
  */
 export const AGES: { name: string; short: string; cost: Cost; time: number; unlocks: string }[] = [
   { name: 'Foraging Age', short: 'Foraging', cost: {}, time: 0, unlocks: 'Gathering, huts and depots.' },
-  { name: 'Rain-fed Farming Age', short: 'Farming', cost: { food: 150, stone: 50 }, time: 20, unlocks: 'Farm plots, cisterns, the market and seawalls.' },
-  { name: 'Recovery Age', short: 'Recovery', cost: { food: 300, water: 100, stone: 150, bbd: 80 }, time: 30, unlocks: 'Composters and windbreaks to repair worn-out land.' },
-  { name: 'Sustainable Tech Age', short: 'Sustainable Tech', cost: { food: 400, water: 150, stone: 200, bbd: 150 }, time: 40, unlocks: 'Aquaponics and solar power.' },
-  { name: 'Co-op Age', short: 'Co-op', cost: { food: 600, water: 200, stone: 300, bbd: 300 }, time: 50, unlocks: 'The Co-op Hub. Reaching this age is needed to win.' },
+  { name: 'Rain-fed Farming Age', short: 'Farming', cost: { food: 150, stone: 50 }, time: 20, unlocks: 'Chattel houses, farm plots, cisterns, the market and seawalls.' },
+  { name: 'Recovery Age', short: 'Recovery', cost: { food: 300, water: 100, stone: 150, bbd: 80 }, time: 30, unlocks: 'Coral stone houses, and composters and windbreaks to repair worn-out land.' },
+  { name: 'Sustainable Tech Age', short: 'Sustainable Tech', cost: { food: 400, water: 150, stone: 200, bbd: 150 }, time: 40, unlocks: 'Townhouses, aquaponics and solar power.' },
+  { name: 'Co-op Age', short: 'Co-op', cost: { food: 600, water: 200, stone: 300, bbd: 300 }, time: 50, unlocks: 'Apartment blocks and the Co-op Hub. Reaching this age is needed to win.' },
 ];
 export const MAX_AGE = AGES.length;
 /** Windbreak shield radius and composter reach, in tiles. */

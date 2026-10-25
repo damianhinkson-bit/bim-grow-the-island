@@ -14,6 +14,8 @@ export interface Building {
   id: number; type: BType; x: number; y: number; w: number; h: number; owner: string;
   done: boolean; progress: number; hp: number; maxHp: number;
   queue: number; trainT: number; pest: number; worker: number | null; variant: number;
+  /** Houses only: which kind of house it is, 1–5 (see HOUSES). Other buildings: 1. */
+  lvl: number;
 }
 
 export type Goal = { k: 'tile'; i: number } | { k: 'rect'; x: number; y: number; w: number; h: number };

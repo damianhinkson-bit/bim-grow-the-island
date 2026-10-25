@@ -1,7 +1,7 @@
 import { Application, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
-import { H, SEA_R, TOWNS, W, drought, placeBlock, player, roadNetwork, roadOwner, type BType, type State } from '@bim/sim';
+import { AGRO, DIFFICULTY, DT, H, SEA_R, TOWNS, W, drought, findPath, passable, placeBlock, player, roadNetwork, roadOwner, type BType, type Goal, type State } from '@bim/sim';
 import type { GameSession } from './game';
-import { buildingTex, nodeTex, workerTex } from './sprites';
+import { buildingTex, nodeTex, truckTex, workerTex, type TruckKind } from './sprites';
 import { T, bakeOwnership, bakeTerrain } from './terrain';
 
 export type Selection =
@@ -9,6 +9,7 @@ export type Selection =
   | { kind: 'building'; id: number }
   | { kind: 'node'; id: number }
   | { kind: 'parish'; id: number }
+  | { kind: 'player'; id: string }
   | null;
 export interface View { sel: Selection; buildMode: BType | null; marks: { x: number; y: number; t: number }[]; roadMode: boolean; roadDraft: Set<number> }
 
@@ -36,6 +37,10 @@ export class Renderer {
   private nodesL = new Container();
   private bldL = new Container();
   private wrkL = new Container();
+  /** AgroCorp's trucks: only for show, worked out from the game state, so every phone draws the same thing. */
+  private agroL = new Container();
+  private trucks: Sprite[] = [];
+  private routes: { key: string; list: { pts: number[]; kind: TruckKind; offset: number }[] } = { key: '', list: [] };
   private above = new Graphics();
   private fx = new Graphics();
   private nodeSpr = new Map<number, Sprite>();
@@ -74,8 +79,8 @@ export class Renderer {
     this.TS = Math.min(dpr >= 1.5 ? 2 : 1.25, maxSide / (Math.max(W, H) * T));
     this.ownTS = Math.min(1, this.TS);
     this.app.stage.addChild(this.world, this.overlay);
-    this.bldL.sortableChildren = true; this.wrkL.sortableChildren = true;
-    this.world.addChild(this.roadG, this.below, this.nodesL, this.bldL, this.wrkL, this.above);
+    this.bldL.sortableChildren = true; this.wrkL.sortableChildren = true; this.agroL.sortableChildren = true;
+    this.world.addChild(this.roadG, this.below, this.nodesL, this.bldL, this.agroL, this.wrkL, this.above);
     this.setGame(game);
   }
 
@@ -101,6 +106,7 @@ export class Renderer {
     this.landmarkLabels.forEach((l) => l.t.destroy());
     this.landmarkLabels = (['port', 'airport'] as const).map((type) => ({ type, t: label(type === 'port' ? 'PORT' : 'AIRPORT', 9.5) }));
     this.roadVer = '';
+    this.routes = { key: '', list: [] };
     this.overlay.addChild(this.fx);
   }
 
@@ -133,9 +139,81 @@ export class Renderer {
     this.syncNodes(s);
     this.syncBuildings(s);
     this.syncWorkers(game, view);
+    this.drawTrucks(s, game.alpha);
     this.drawAbove(s, view, game);
     this.drawLabels(s);
     this.drawFx(s);
+  }
+
+  /**
+   * What AgroCorp is doing, made visible: white pickups drive from its HQ to survey the parish it wants next (two once
+   * it's about to buy), and cane trucks haul from its plantations to the port. Routes follow the roads.
+   */
+  private agroRoutes(s: State) {
+    const grace = s.time < DIFFICULTY[s.difficulty].grace;
+    const key = `${s.agro.target}:${s.agro.warned}:${grace}:${s.parishVersion}:${s.roadVersion}:${Math.floor(s.time / 20)}`;
+    if (key === this.routes.key) return this.routes.list;
+    const list: typeof this.routes.list = [];
+    const bs = Object.values(s.buildings);
+    const hq = bs.find((b) => b.type === 'hq'), port = bs.find((b) => b.type === 'port');
+    // a free tile next to a building, and the free tile nearest a parish's centre
+    const beside = (x: number, y: number, w: number, h: number) => {
+      for (let r = 1; r <= 3; r++) for (let yy = y - r; yy < y + h + r; yy++) for (let xx = x - r; xx < x + w + r; xx++) {
+        if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+        const i = yy * W + xx; if (passable(s, i)) return i;
+      }
+      return -1;
+    };
+    const inParish = (pid: number) => {
+      const p = s.parishes[pid], cx = Math.round(p.lx), cy = Math.round(p.ly);
+      for (let r = 0; r <= 6; r++) for (let yy = cy - r; yy <= cy + r; yy++) for (let xx = cx - r; xx <= cx + r; xx++) {
+        if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+        const i = yy * W + xx; if (s.map.pid[i] === pid && passable(s, i)) return i;
+      }
+      return -1;
+    };
+    const route = (from: number, goal: Goal, kind: TruckKind, offset: number) => {
+      if (from < 0) return;
+      const path = findPath(s, from, goal);
+      if (path && path.length > 2) list.push({ pts: [from, ...path], kind, offset });
+    };
+    if (hq) {
+      const start = beside(hq.x, hq.y, 2, 2);
+      if (!grace && s.agro.target !== null) {
+        const to = inParish(s.agro.target);
+        if (to >= 0) { route(start, { k: 'tile', i: to }, 'survey', 0); if (s.agro.warned) route(start, { k: 'tile', i: to }, 'survey', 0.5); }
+      }
+      if (port) {
+        const farms = s.parishes.filter((p) => p.owner === AGRO).slice(0, 3);
+        farms.forEach((p, k) => route(inParish(p.id), { k: 'rect', x: port.x, y: port.y, w: 2, h: 2 }, 'cane', k * 0.37));
+      }
+    }
+    this.routes = { key, list };
+    return list;
+  }
+  private drawTrucks(s: State, alpha: number) {
+    const list = this.agroRoutes(s), t = s.time + alpha * DT, SPEED_T = 3.2, WAIT = 3;
+    while (this.trucks.length < list.length) { const sp = new Sprite(); sp.anchor.set(0.5, 0.85); this.agroL.addChild(sp); this.trucks.push(sp); }
+    this.trucks.forEach((sp, k) => {
+      const r = list[k]; sp.visible = !!r; if (!r) return;
+      const n = r.pts.length - 1, drive = n / SPEED_T, period = 2 * drive + 2 * WAIT;
+      const ph = (((t / period + r.offset) % 1) + 1) % 1 * period;
+      // out, wait at the far end, back, wait at the start
+      let d: number, moving: 1 | -1 | 0;
+      if (ph < drive) { d = ph / drive; moving = 1; }
+      else if (ph < drive + WAIT) { d = 1; moving = 0; }
+      else if (ph < 2 * drive + WAIT) { d = 1 - (ph - drive - WAIT) / drive; moving = -1; }
+      else { d = 0; moving = 0; }
+      const f = d * n, a = Math.min(n - 1, Math.floor(f)), b = a + 1, w = f - a;
+      const ax = r.pts[a] % W, ay = (r.pts[a] / W) | 0, bx = r.pts[b] % W, by = (r.pts[b] / W) | 0;
+      sp.texture = truckTex(r.kind);
+      sp.position.set((ax + (bx - ax) * w + 0.5) * T, (ay + (by - ay) * w + 0.5) * T);
+      sp.zIndex = sp.y;
+      // about a tile long (textures are drawn at 3x); face the way it's driving, and keep facing that way while parked
+      const dx = (bx - ax) * moving, size = 26 / sp.texture.width;
+      const dir = dx ? Math.sign(dx) : Math.sign(sp.scale.x) || 1;
+      sp.scale.set(dir * size, size);
+    });
   }
 
   private drawBelow(s: State, view: View, game: GameSession) {
@@ -239,7 +317,7 @@ export class Renderer {
     for (const b of Object.values(s.buildings)) {
       seen.add(b.id);
       let sp = this.bSpr.get(b.id);
-      const tex = buildingTex(b.type, b.variant, { dry: b.type === 'cistern' && dry, foundation: !b.done, age: player(s, b.owner)?.age ?? 3 });
+      const tex = buildingTex(b.type, b.variant, { dry: b.type === 'cistern' && dry, foundation: !b.done, age: b.type === 'house' ? b.lvl : player(s, b.owner)?.age ?? 3 });
       if (!sp) { sp = new Sprite(tex); this.bldL.addChild(sp); this.bSpr.set(b.id, sp); }
       if (sp.texture !== tex) sp.texture = tex;
       sp.width = b.w * T; sp.height = b.h * T; sp.position.set(b.x * T, b.y * T); sp.zIndex = b.y;

@@ -166,7 +166,27 @@ export function bakeOwnership(st: State, TS: number, c?: HTMLCanvasElement): HTM
     const col = ownerColor(st, p.owner); if (!col) continue;
     g.beginPath(); polyPath(g, p.poly, S);
     g.fillStyle = hexA(col, p.owner === AGRO ? 0.26 : 0.22); g.fill();
+    if (p.owner === AGRO) caneFields(st, g, p.id, p.poly, S);
     g.strokeStyle = hexA(col, 0.95); g.lineWidth = 2.4 * TS; g.stroke();
   }
   return c;
+}
+
+/**
+ * AgroCorp's land is planted in one crop: blocks of cane in rows, leaving the roads clear. The pattern comes from the
+ * tile position, so it's the same on every phone and every redraw.
+ */
+function caneFields(st: State, g: CanvasRenderingContext2D, pid: number, poly: number[], S: number) {
+  const hash = (x: number, y: number) => { let h = (x * 374761393 + y * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+  g.save(); g.beginPath(); polyPath(g, poly, S); g.clip();
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x;
+    if (st.map.pid[i] !== pid || !st.map.land[i] || st.roads[i]) continue;
+    if (hash(x >> 1, y >> 1) > 0.72) continue; // fields in 2x2 blocks with a few gaps between them
+    const px = x * S, py = y * S;
+    g.fillStyle = 'rgba(176,196,70,.42)'; g.fillRect(px, py, S, S);
+    g.fillStyle = 'rgba(78,118,30,.6)';
+    for (let k = 0; k < 4; k++) g.fillRect(px, py + (k + 0.35) * S / 4, S, Math.max(1, S * 0.07));
+  }
+  g.restore();
 }

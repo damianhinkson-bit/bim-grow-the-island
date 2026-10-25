@@ -1,6 +1,6 @@
 import {
   AGES, AGRO, COMPOST_BONUS, COMPOST_R, HUB_DUES, MAX_AGE, WINDBREAK_R, AGRO_HOME, BOAT_COST, BOAT_RATE, BT, CARRY, DEALS, DIFFICULTY, DT, DUES, EAT, FEE, MAX_BOATS, RELIEF, RES, ROAD_COST, TOURISM, H, HNAMES, STALL, MAX_PLAYERS, NT, PLAYER_COLORS, SEA_R, SPEED, START_PARISHES, START_RES,
-  TRAIN, TRAIN_COST, W, WIN_N, canAfford, fmtCost, pay,
+  TRAIN, TRAIN_COST, W, WIN_N, HOUSES, POP_MAX, canAfford, fmtCost, pay, type Cost,
   type BType, type DealId, type Difficulty, type Landmark, type NodeType, type Res,
 } from './defs';
 import { buildMap, inB, ix, iy } from './map';
@@ -163,7 +163,8 @@ function removeNode(s: State, n: Node) { n.amt = 0; if (s.nodeAt[n.i] === n.id) 
 
 export function addBuilding(s: State, type: BType, x: number, y: number, owner: string, done: boolean): Building {
   const d = BT[type], id = s.nextId++;
-  const b: Building = { id, type, x, y, w: d.w, h: d.h, owner, done, progress: done ? 1 : 0, hp: d.hp, maxHp: d.hp, queue: 0, trainT: 0, pest: 0, worker: null, variant: id % 6 };
+  const lvl = type === 'house' ? houseLevelFor(s, owner) : 1, hp = type === 'house' ? HOUSES[lvl - 1].hp : d.hp;
+  const b: Building = { id, type, x, y, w: d.w, h: d.h, owner, done, progress: done ? 1 : 0, hp, maxHp: hp, queue: 0, trainT: 0, pest: 0, worker: null, variant: id % 6, lvl };
   for (let dy = 0; dy < b.h; dy++) for (let dx = 0; dx < b.w; dx++) s.bAt[(y + dy) * W + x + dx] = id;
   s.buildings[id] = b; return b;
 }
@@ -198,8 +199,22 @@ export const tcOf = (s: State, owner: string) => Object.values(s.buildings).find
 export const workersOf = (s: State, owner: string) => Object.values(s.workers).filter((w) => w.owner === owner);
 export function popCap(s: State, owner: string): number {
   let c = 0;
-  for (const b of Object.values(s.buildings)) if (b.owner === owner && b.done) c += BT[b.type].pop ?? 0;
-  return Math.min(60, c);
+  for (const b of Object.values(s.buildings)) if (b.owner === owner && b.done) c += popOf(b);
+  return Math.min(POP_MAX, c);
+}
+/** People a building houses. */
+export function popOf(b: { type: BType; lvl?: number }): number { return b.type === 'house' ? HOUSES[(b.lvl ?? 1) - 1].pop : BT[b.type].pop ?? 0; }
+/** The kind of house a player builds now: the one for their age. */
+export function houseLevelFor(s: State, owner: string): number { return Math.max(1, Math.min(HOUSES.length, player(s, owner)?.age ?? 1)); }
+/** What it costs this player to build something: houses cost what their age's house costs. */
+export function buildCost(s: State, owner: string, type: BType): Cost { return type === 'house' ? HOUSES[houseLevelFor(s, owner) - 1].cost : BT[type].cost; }
+/** A building's name, e.g. 'Coral Stone House'. */
+export function bName(b: { type: BType; lvl?: number }): string { return b.type === 'house' ? HOUSES[(b.lvl ?? 1) - 1].name : BT[b.type].name; }
+/** The upgrade open to a house: the next kind, if the owner's age allows it. */
+export function houseUpgrade(s: State, b: Building): { to: number; cost: Cost } | null {
+  if (b.type !== 'house' || !b.done || b.lvl >= HOUSES.length) return null;
+  const age = player(s, b.owner)?.age ?? 1;
+  return b.lvl < age ? { to: b.lvl + 1, cost: HOUSES[b.lvl].cost } : null;
 }
 export function protectedB(s: State, b: Building): boolean {
   const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
@@ -445,6 +460,7 @@ export function step(s: State): void {
     if (!b.done) continue;
     const me = player(s, b.owner); if (!me) continue;
     if (b.type === 'cistern' && !drought(s)) { me.res.water += 0.5 * dt; me.flow.gain.water += 0.5 * dt; }
+    if (b.type === 'house') { const g = HOUSES[b.lvl - 1].garden * dt; if (g) { me.res.food += g; me.stats.food += g; me.flow.gain.food += g; } }
     if (b.type === 'aqua') {
       const f = aquaPowered(s, b) ? 1 : 0.5, use = 0.5 * f * dt;
       const food = me.res.water >= use ? ((me.res.water -= use), (me.flow.upkeep.water += use), 2 * f * dt) : 0.6 * f * dt;
@@ -479,14 +495,16 @@ function landfall(s: State) {
   const lost: Record<string, number> = {}, dmg: Record<string, number> = {};
   for (const b of Object.values(s.buildings)) {
     if (b.owner === AGRO || b.owner === 'public') continue;
-    const prot = protectedB(s, b);
+    // coral stone and newer houses stand up to a hurricane; a chattel house takes half the damage
+    const wind = b.type === 'house' ? HOUSES[b.lvl - 1].wind : 0;
+    const prot = protectedB(s, b) || wind === 2;
     const L = () => (lost[b.owner] = (lost[b.owner] ?? 0) + 1), D = () => (dmg[b.owner] = (dmg[b.owner] ?? 0) + 1);
     if (!b.done) { if (!prot && rand(s) < 0.5) { removeBuilding(s, b); L(); } continue; }
     if (b.type === 'tc') { if (!prot) { b.hp = Math.max(1, b.hp - b.maxHp * 0.3); D(); } continue; }
     let hit = false;
     if (b.type === 'seawall' || b.type === 'windbreak') b.hp -= b.maxHp * 0.15;
     else if (prot) { if (rand(s) < 0.15) { b.hp -= b.maxHp * 0.2; hit = true; } }
-    else if (rand(s) < 0.7) { b.hp -= b.maxHp * (0.5 + rand(s) * 0.4); hit = true; }
+    else if (rand(s) < 0.7) { b.hp -= b.maxHp * (0.5 + rand(s) * 0.4) * (wind === 1 ? 0.5 : 1); hit = true; }
     if (b.hp <= 0) { removeBuilding(s, b); L(); } else if (hit) D();
   }
   for (const n of s.nodes) if (n.type === 'tree' && n.amt > 0 && rand(s) < 0.3) n.amt *= 0.5;
@@ -574,6 +592,7 @@ export type Command =
   | { type: 'age' }
   | { type: 'market'; trade: MarketTrade }
   | { type: 'repair'; building: number }
+  | { type: 'upgrade'; building: number }
   | { type: 'claim'; parish: number }
   | { type: 'road'; tiles: number[] }
   | { type: 'trade'; at: Landmark; deal: DealId }
@@ -625,8 +644,9 @@ export function applyCommand(s: State, pid: string, c: Command): CmdResult {
     case 'place': {
       const d = BT[c.building]; if (!d || c.building === 'tc' || c.building === 'hq') return fail('Unknown building.');
       const r = placeBlock(s, pid, c.building, c.x, c.y); if (r) return fail(r);
-      if (!canAfford(me.res, d.cost)) return fail(`Not enough for a ${d.name}: needs ${fmtCost(d.cost)}.`);
-      spend(me, d.cost);
+      const cost = buildCost(s, pid, c.building), nm = bName({ type: c.building, lvl: houseLevelFor(s, pid) });
+      if (!canAfford(me.res, cost)) return fail(`Not enough for a ${nm}: needs ${fmtCost(cost)}.`);
+      spend(me, cost);
       const b = addBuilding(s, c.building, c.x, c.y, pid, false);
       let ws = mine(c.workers);
       if (!ws.length) {
@@ -661,6 +681,18 @@ export function applyCommand(s: State, pid: string, c: Command): CmdResult {
       else if (c.trade === 'sell-stone') { if (me.res.stone < 100) return fail('Not enough stone.'); spend(me, { stone: 100 }); earn(me, 'bbd', 40); }
       else { if (me.res.bbd < 50) return fail('Not enough BBD.'); spend(me, { bbd: 50 }); earn(me, 'water', 100); }
       return { ok: true };
+    }
+    case 'upgrade': {
+      const b = s.buildings[c.building]; if (!b || b.owner !== pid) return fail("That isn't your building.");
+      if (b.type !== 'house') return fail('Only houses can be upgraded.');
+      if (!b.done) return fail('Finish building it first.');
+      const up = houseUpgrade(s, b);
+      if (!up) return fail(b.lvl >= HOUSES.length ? 'This is already the best kind of house.' : `Reach the ${AGES[b.lvl].name} to upgrade to a ${HOUSES[b.lvl].name}.`);
+      if (!canAfford(me.res, up.cost)) return fail(`Upgrading to a ${HOUSES[up.to - 1].name} needs ${fmtCost(up.cost)}.`);
+      spend(me, up.cost);
+      const was = HOUSES[b.lvl - 1], next = HOUSES[up.to - 1];
+      b.lvl = up.to; b.maxHp = next.hp; b.hp = next.hp;
+      return { ok: true, msg: `Upgraded to a ${next.name}: now houses ${next.pop} people (was ${was.pop}).` };
     }
     case 'repair': {
       const b = s.buildings[c.building]; if (!b || b.owner !== pid || !b.done) return fail("That isn't your building.");
@@ -756,7 +788,7 @@ export function stateHash(s: State): string {
   mix(s.tick); mix(s.rng); mix(s.agro.bbd); mix(s.agro.target ?? -1); mix(s.roadVersion);
   for (const p of s.players) { mix(p.res.food); mix(p.res.water); mix(p.res.stone); mix(p.res.bbd); mix(p.age); }
   for (const w of Object.values(s.workers)) { mix(w.id); mix(w.x); mix(w.y); mix(w.amt); }
-  for (const b of Object.values(s.buildings)) { mix(b.id); mix(b.hp); mix(b.progress); }
+  for (const b of Object.values(s.buildings)) { mix(b.id); mix(b.hp); mix(b.progress); mix(b.lvl); }
   for (const p of s.parishes) mix(p.owner ? p.owner.charCodeAt(p.owner.length - 1) : 0);
   for (const n of s.nodes) mix(n.amt === Infinity ? -1 : n.amt);
   mix(s.offers.length);
@@ -778,6 +810,8 @@ export function restore(snap: Snapshot): State {
   const { owners, nodeAt, bAt, roads, ...rest } = snap.state;
   // JSON turns Infinity (a spring's endless water) into null
   for (const n of rest.nodes) { if (n.max === null) n.max = Infinity; if (n.amt === null) n.amt = Infinity; }
+  // saves from before house levels
+  for (const b of Object.values(rest.buildings)) b.lvl ??= 1;
   return {
     ...(rest as Omit<State, 'map' | 'parishes' | 'nodeAt' | 'bAt' | 'roads'>),
     map, parishes: parishes.map((p, k) => ({ ...p, owner: owners[k] ?? null })),

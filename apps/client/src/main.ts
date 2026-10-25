@@ -41,7 +41,7 @@ async function boot() {
 
   const ui = new UI(game, r, () => { ui.stop(); leaveNet(); menu.home(); });
   const menu = new Menu({
-    solo: (difficulty: Difficulty) => { leaveNet(); play(new LocalGame({ players: 1, difficulty })); },
+    solo: (difficulty: Difficulty, bots: number) => { leaveNet(); play(new LocalGame({ players: 1, difficulty, bots })); },
     create: (name) => { leaveNet(); net = new NetworkGame(handlers(), name); net.create(); },
     join: (name, code) => { leaveNet(); net = new NetworkGame(handlers(), name); net.join(code); },
     settings: (m) => net?.settings(m),

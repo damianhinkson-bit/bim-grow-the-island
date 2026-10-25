@@ -1,10 +1,11 @@
 import {
-  AGES, AGRO, AGRO_HOME, MAX_AGE, BOAT_COST, BOAT_RATE, BT, BUILD_LIST, DEALS, DUES, MAX_BOATS, NT, RELIEF, ROAD_COST, STALL, TOURISM, TRAIN, W,
+  AGES, AGRO, AGRO_HOME, DIFFICULTY, MAX_AGE, BOAT_COST, BOAT_RATE, BT, BUILD_LIST, DEALS, DUES, MAX_BOATS, NT, RELIEF, ROAD_COST, STALL, TOURISM, TRAIN, W,
   airportOpen, aquaPowered, canAfford, claimBlock, claimCost, dealTerms, drought, fmtCost, landmarkHolder, linked, owned,
-  parishBuilt, player, popCap, protectedB, rivalCost, tcOf, teamOwned, winTarget, workersOf,
+  parishBuilt, player, popCap, protectedB, rivalCost, rivalPrice, tcOf, HOUSES, bName, buildCost, houseLevelFor, houseUpgrade, teamOwned, winTarget, workersOf,
   type BType, type Command, type DealId, type Landmark, type Res, type State, type Worker,
 } from '@bim/sim';
 import { FlowTracker, dashboardHTML } from './dashboard';
+import { infoCard } from './info';
 import type { GameSession } from './game';
 import type { Renderer, View } from './render';
 import { T } from './terrain';
@@ -39,7 +40,7 @@ export class UI {
   constructor(private game: GameSession, private r: Renderer, private onEnd: () => void) {
     this.bindPanel(); this.bindBar(); this.bindInput(); this.bindKeys(); this.bindDash();
   }
-  setGame(game: GameSession) { this.seenAge = 1; this.storyShown = false; this.flows.reset(); this.closeDash(); this.game = game; this.view = { sel: null, buildMode: null, marks: [], roadMode: false, roadDraft: new Set() }; this.menu = null; this.lastPanel = ''; this.hudCache = {}; }
+  setGame(game: GameSession) { this.seenAge = 1; this.storyShown = false; this.flows.reset(); this.closeDash(); this.game = game; this.view = { sel: null, buildMode: null, marks: [], roadMode: false, roadDraft: new Set() }; this.menu = null; this.lastPanel = ''; this.hudCache = {}; this.lastAgroTarget = game.state.agro.target; }
 
   private get s(): State { return this.game.state; }
   private get me() { return player(this.s, this.game.me)!; }
@@ -135,6 +136,7 @@ export class UI {
     else if (a === 'sell-food' || a === 'sell-stone' || a === 'buy-water' || a === 'stall-food') this.send({ type: 'market', trade: a });
     else if (a === 'money') { this.menu = this.menu === 'money' ? null : 'money'; this.view.buildMode = null; }
     else if (a === 'repair' && sel?.kind === 'building') this.send({ type: 'repair', building: sel.id });
+    else if (a === 'upgrade' && sel?.kind === 'building') this.send({ type: 'upgrade', building: sel.id });
     else if (a === 'claim' && sel?.kind === 'parish') this.send({ type: 'claim', parish: sel.id });
     this.renderPanel(true);
   }
@@ -147,7 +149,7 @@ export class UI {
     const t = w.task; let st = 'Idle';
     if (t) {
       if (t.k === 'move') st = 'Walking';
-      else if (t.k === 'build') st = `Building ${BT[this.s.buildings[t.b]?.type ?? 'house'].name}`;
+      else if (t.k === 'build') { const bb = this.s.buildings[t.b]; st = `Building ${bb ? bName(bb) : 'a house'}`; }
       else if (t.k === 'farm') st = 'Farming';
       else st = `Gathering ${NT[this.s.nodes[t.n].type].label.toLowerCase()}`;
       if (w.phase === 'drop') st += ', heading to drop off';
@@ -162,8 +164,8 @@ export class UI {
       return `<h3>Lay road</h3><p>Drag across tiles in your parishes. <strong>${ROAD_COST} coral stone a tile</strong>; you have ${Math.floor(me.res.stone)}. Workers walk twice as fast on roads. Gold roads connect to your Town Centre, Depots and Markets${linkedTo.length ? `, and already reach ${linkedTo.join(' and ')}` : ''}.</p><div class="btns">${this.btn('cancel', 'Done', undefined, { primary: true })}</div>`;
     }
     if (this.view.buildMode) {
-      const d = BT[this.view.buildMode];
-      return `<h3>Place ${d.name}</h3><p>Tap ${d.coast ? 'a coast tile' : 'an empty tile'} inside your parishes. ${d.desc}</p><div class="btns">${this.btn('cancel', 'Cancel')}</div>`;
+      const type = this.view.buildMode, d = BT[type], lvl = type === 'house' ? houseLevelFor(s, me.id) : 1;
+      return `<h3>Place ${bName({ type, lvl })}</h3><p class="hint">Tap ${d.coast ? 'a coast tile' : 'an empty tile'} inside your parishes.</p>${infoCard(type, lvl, { cost: buildCost(s, me.id, type) })}<div class="btns">${this.btn('cancel', 'Cancel')}</div>`;
     }
     if (this.menu === 'trade' && this.tradeWith) {
       const other = player(s, this.tradeWith.pid);
@@ -185,8 +187,9 @@ export class UI {
     }
     if (this.menu === 'build') {
       return `<h3>Build</h3><p>Costs come out when you place it. Selected or idle workers go build it.</p><div class="grid2">${this.btn('roadmode', 'Road', `${ROAD_COST} stone a tile`, { disabled: me.res.stone < ROAD_COST })}${BUILD_LIST.map((k) => {
-        const d = BT[k], locked = (d.age ?? 1) > me.age;
-        return this.btn('place:' + k, d.name, locked ? `${AGES[(d.age ?? 1) - 1].short} Age` : fmtCost(d.cost), { disabled: locked || !canAfford(me.res, d.cost) });
+        const d = BT[k], locked = (d.age ?? 1) > me.age, cost = buildCost(s, me.id, k);
+        const name = k === 'house' ? HOUSES[houseLevelFor(s, me.id) - 1].name : d.name;
+        return this.btn('place:' + k, name, locked ? `${AGES[(d.age ?? 1) - 1].short} Age` : fmtCost(cost), { disabled: locked || !canAfford(me.res, cost) });
       }).join('')}</div>`;
     }
     if (!sel) return `<h3>Grow the island</h3><p>Goal: feed <strong>${winTarget(s)} parishes</strong> and reach the <strong>Co-op Age</strong>. Tap a worker, then tap breadfruit, coral stone, a spring or fish. Tap any parish to see it.</p>`;
@@ -203,10 +206,10 @@ export class UI {
     }
     if (sel.kind === 'building') {
       const b = s.buildings[sel.id]; if (!b) { this.view.sel = null; return this.panelHTML(); }
-      const d = BT[b.type], mine = b.owner === this.game.me;
+      const d = BT[b.type], mine = b.owner === this.game.me, name = bName(b);
       if (b.type === 'port' || b.type === 'airport') return this.landmarkHTML(b.type);
       const ownerName = mine ? '' : ` <span class="tag t-free">${player(s, b.owner)?.name ?? 'AgroCorp'}</span>`;
-      if (!b.done) return `<h3>${d.name}${ownerName}</h3><p>Under construction: ${Math.floor(b.progress * 100)}%. Select workers and tap it to help build.</p><div class="btns">${this.btn('deselect', 'Close')}</div>`;
+      if (!b.done) return `<h3>${name}${ownerName}</h3><p>Under construction: ${Math.floor(b.progress * 100)}%. Select workers and tap it to help build.</p><div class="btns">${this.btn('deselect', 'Close')}</div>`;
       let info = d.desc, btns = '';
       if (b.type === 'tc' && mine) {
         info = `Trains workers. ${b.queue ? `Training ${b.queue} (next in ${Math.ceil(TRAIN - b.trainT)}s${workersOf(s, me.id).length >= popCap(s, me.id) ? ', needs a house' : ''}).` : ''}`;
@@ -222,9 +225,16 @@ export class UI {
       if (b.type === 'farm') info = `${b.worker !== null ? 'Being farmed.' : 'No farmer. Select a worker and tap this plot.'}${b.pest > 0 ? ` Pests: ${Math.ceil(b.pest)}s left.` : ''}${me.res.water < 1 ? ' Out of water, so growth is slow.' : ''}`;
       if (b.type === 'aqua') info = aquaPowered(s, b) ? 'Powered by solar. +2 food/s.' : 'No solar array within 5 tiles, so it runs at half speed.';
       if (mine && b.hp < b.maxHp) { const c = Math.ceil((b.maxHp - b.hp) * 0.25); btns += this.btn('repair', 'Repair', `${c} stone`, { disabled: me.res.stone < c }); }
-      const hp = `Condition ${Math.round((b.hp / b.maxHp) * 100)}%.${b.type !== 'seawall' && b.type !== 'tc' ? (protectedB(s, b) ? ' Shielded by a seawall.' : ' Not shielded from hurricanes.') : ''}`;
-      return `<h3>${d.name}${ownerName}</h3><p>${info} ${hp}</p><div class="btns">${btns}${this.btn('deselect', 'Close')}</div>`;
+      const proof = b.type === 'house' && HOUSES[b.lvl - 1].wind === 2;
+      const hp = `Condition ${Math.round((b.hp / b.maxHp) * 100)}%.${b.type !== 'seawall' && b.type !== 'tc' && !proof ? (protectedB(s, b) ? ' Shielded from hurricanes by a seawall or windbreak.' : '') : ''}`;
+      if (b.type === 'house' && mine) {
+        const up = houseUpgrade(s, b);
+        if (up) { const n = HOUSES[up.to - 1]; btns = this.btn('upgrade', `Upgrade to ${n.name}`, `${fmtCost(up.cost)} · holds ${n.pop}`, { primary: true, disabled: !canAfford(me.res, up.cost) }) + btns; }
+      }
+      const card = info === d.desc ? infoCard(b.type, b.lvl) : `<p>${info}</p>${infoCard(b.type, b.lvl).replace(/<p class="about">.*?<\/p>/, '')}`;
+      return `<h3>${name}${ownerName}</h3>${card}<p class="hint">${hp}</p><div class="btns">${btns}${this.btn('deselect', 'Close')}</div>`;
     }
+    if (sel.kind === 'player') return this.playerHTML(sel.id);
     if (sel.kind === 'parish') {
       const p = s.parishes[sel.id];
       const op = p.owner && p.owner !== AGRO ? player(s, p.owner) : undefined;
@@ -241,7 +251,7 @@ export class UI {
           b2 = this.btn('claim', p.owner ? 'Win it over' : 'Feed this parish', fmtCost(c), { primary: true, disabled: !canAfford(me.res, c) });
         } else body = block;
       }
-      if (s.agro.target === p.id && s.agro.warned) body += ' <strong>AgroCorp is about to buy it.</strong>';
+      if (s.agro.target === p.id) body += s.agro.warned ? ' <strong>AgroCorp is about to buy it.</strong>' : ` AgroCorp's trucks are surveying it (${Math.min(99, Math.floor((s.agro.bbd / rivalPrice(s)) * 100))}% saved).`;
       return `<h3>${p.name}</h3><p>${tag} ${body}</p><div class="btns">${b2}${this.btn('deselect', 'Close')}</div>`;
     }
     return '';
@@ -302,6 +312,18 @@ export class UI {
   private bindBar() {
     $('#b-build').onclick = () => { if (this.running) this.act('build'); };
     $('#c-bbd').onclick = () => { if (this.running) this.act('money'); };
+    $('#s-players').onclick = (e) => {
+      const pid = (e.target as HTMLElement).closest<HTMLElement>('[data-pid]')?.dataset.pid; if (!pid || !this.running) return;
+      const tc = tcOf(this.s, pid), p = player(this.s, pid);
+      if (tc) this.r.centerOn(tc.x + 1, tc.y + 1); else if (p) this.r.centerOn(this.s.parishes[p.home].lx, this.s.parishes[p.home].ly);
+      this.view.sel = { kind: 'player', id: pid }; this.menu = null; this.view.buildMode = null; this.renderPanel(true);
+    };
+    // show where AgroCorp is working: the parish it wants next, or its home
+    $('#s-agro').onclick = () => {
+      if (!this.running) return;
+      const s = this.s, id = s.agro.target ?? AGRO_HOME, p = s.parishes[id];
+      this.r.centerOn(p.lx, p.ly); this.view.sel = { kind: 'parish', id }; this.renderPanel(true);
+    };
     $('#b-all').onclick = () => { if (!this.running) return; this.view.sel = { kind: 'workers', ids: new Set(workersOf(this.s, this.game.me).map((w) => w.id)) }; this.menu = null; this.view.buildMode = null; this.renderPanel(true); };
     $('#b-idle').onclick = () => {
       if (!this.running) return;
@@ -412,15 +434,75 @@ export class UI {
     const dr = drought(s); $('#s-dry').hidden = !dr; if (dr) this.setT('s-dry', `Drought ${fmtT(s.weather.droughtUntil - s.time)}`);
     const mine = s.mode === 'coop' ? teamOwned(s, me.team) : owned(s, me.id);
     this.setT('s-par', `You ${mine}/${winTarget(s)} · AgroCorp ${owned(s, AGRO)}/6`);
-    // online: one dot per player, faded and struck through while they're away
+    // one dot per player (online, or with computer co-ops), faded and struck through while they're away. Tap one to
+    // go to that co-op and see what they've built.
     const pl = $('#s-players');
-    if (this.game.online) {
-      const html = s.players.map((p) => { const on = this.game.connected?.(p.id) ?? true, ai = this.game.caretaken?.(p.id) ?? false; return `<span class="pdot${on ? '' : ' off'}${ai ? ' ai' : ''}" style="background:${p.color}" title="${p.name}${on ? '' : ai ? ' (away, computer playing)' : ' (away)'}">${ai ? 'AI' : ''}</span>`; }).join('');
+    if (this.game.online || s.players.length > 1) {
+      const html = s.players.map((p) => {
+        const on = this.game.connected?.(p.id) ?? true, ai = this.game.caretaken?.(p.id) ?? false, bot = this.game.isBot?.(p.id) ?? false;
+        const label = `${p.id === me.id ? 'You' : p.name}${bot ? ' (computer)' : on ? '' : ai ? ' (away, computer playing)' : ' (away)'}. Tap to see their co-op.`;
+        return `<button class="pdot${on ? '' : ' off'}${ai ? ' ai' : ''}" data-pid="${p.id}" style="background:${p.color}" aria-label="${label}" title="${label}">${ai ? 'AI' : ''}</button>`;
+      }).join('');
       if (this.hudCache['s-players'] !== html) { this.hudCache['s-players'] = html; pl.innerHTML = html; pl.setAttribute('aria-label', 'Players: ' + s.players.map((p) => `${p.name}${(this.game.connected?.(p.id) ?? true) ? '' : ' away'}`).join(', ')); }
       pl.hidden = false;
     } else pl.hidden = true;
     $('#s-solo').hidden = !!this.game.online;
     $('#s-rival').style.width = Math.min(100, (s.agro.bbd / rivalCost(s)) * 100) + '%';
+    this.agroStatus();
+  }
+  /** What another co-op has built and is doing: shown when you tap their dot at the top. */
+  private playerHTML(pid: string): string {
+    const s = this.s, p = player(s, pid); if (!p) { this.view.sel = null; return this.panelHTML(); }
+    const you = pid === this.game.me, bot = this.game.isBot?.(pid) ?? false;
+    const tag = you ? '<span class="tag t-you">You</span>' : bot ? '<span class="tag t-free">Computer</span>' : '<span class="tag t-free">Player</span>';
+    const bs = Object.values(s.buildings).filter((b) => b.owner === pid);
+    const done = bs.filter((b) => b.done), building = bs.filter((b) => !b.done);
+    const ws = workersOf(s, pid);
+    const on = (types: string[]) => ws.filter((w) => w.task?.k === 'gather' && types.includes(s.nodes[w.task.n].type)).length;
+    const jobs = [[on(['tree', 'fish']), 'on food'], [ws.filter((w) => w.task?.k === 'farm').length, 'farming'], [on(['rock']), 'on stone'], [on(['spring']), 'on water'], [ws.filter((w) => w.task?.k === 'build').length, 'building'], [ws.filter((w) => !w.task).length, 'idle']]
+      .filter(([n]) => n).map(([n, l]) => `${n} ${l}`).join(', ');
+    const houses = HOUSES.map((h, k) => { const n = done.filter((b) => b.type === 'house' && b.lvl === k + 1).length; return n ? `${n} ${h.name}${n > 1 ? 's' : ''}` : ''; }).filter(Boolean).join(', ');
+    const counts = new Map<string, number>();
+    for (const b of done) if (b.type !== 'house' && b.type !== 'tc') counts.set(bName(b), (counts.get(bName(b)) ?? 0) + 1);
+    const other = [...counts].map(([n, c]) => `${n}${c > 1 ? ` × ${c}` : ''}`).join(', ');
+    const lands = s.parishes.filter((q) => q.owner === pid).map((q) => q.name).join(', ');
+    const next = AGES[p.age];
+    const now = p.ageT >= 0 && next ? `Advancing to the ${next.name} (${Math.ceil(next.time - p.ageT)}s)` : building.length ? `Building ${building.map((b) => bName(b)).slice(0, 2).join(' and ')}` : jobs ? 'Gathering and growing' : 'Resting';
+    const r = p.res;
+    return `<h3>${you ? 'Your co-op' : p.name} ${tag}</h3>
+      <dl class="kv facts">
+        <dt>Now</dt><dd>${now}</dd>
+        <dt>Age</dt><dd>${AGES[p.age - 1].name}</dd>
+        <dt>Parishes (${owned(s, pid)})</dt><dd>${lands || 'None'}</dd>
+        <dt>People (${ws.length} of ${popCap(s, pid)})</dt><dd>${jobs || 'None'}</dd>
+        <dt>Homes</dt><dd>${houses || 'Only the Town Centre'}</dd>
+        ${other ? `<dt>Buildings</dt><dd>${other}</dd>` : ''}
+        <dt>Stockpile</dt><dd>${Math.floor(r.food)} food · ${Math.floor(r.water)} water · ${Math.floor(r.stone)} stone · ${Math.floor(r.bbd)} BBD</dd>
+      </dl><div class="btns">${this.btn('deselect', 'Close')}</div>`;
+  }
+  /** One line on what AgroCorp is up to right now, and a heads-up the moment it picks a new parish. */
+  private lastAgroTarget: number | null = null;
+  private agroStatus() {
+    const s = this.s, ag = s.agro, d = DIFFICULTY[s.difficulty];
+    let txt: string;
+    if (s.time < d.grace) txt = `AgroCorp is setting up · buying starts in ${fmtT(d.grace - s.time)}`;
+    else if (ag.target !== null) {
+      const p = s.parishes[ag.target], pct = Math.min(99, Math.floor((ag.bbd / rivalPrice(s)) * 100));
+      const yours = p.owner === this.game.me ? 'your parish ' : '';
+      txt = ag.warned ? `AgroCorp is about to buy ${yours}${p.name} · ${pct}%` : `AgroCorp is surveying ${yours}${p.name} · ${pct}% saved`;
+    } else txt = owned(s, AGRO) >= 2 ? 'AgroCorp is hauling cane to the port' : 'AgroCorp is looking for land';
+    this.setT('s-agro-t', txt);
+    $('#s-agro').classList.toggle('warn', !!ag.warned);
+    if (ag.target !== this.lastAgroTarget) {
+      const was = this.lastAgroTarget; this.lastAgroTarget = ag.target;
+      if (ag.target !== null && was !== undefined && s.time > 1) {
+        const p = s.parishes[ag.target];
+        this.toast(p.owner === this.game.me
+          ? `AgroCorp's trucks are heading to your parish ${p.name}. A building there keeps it yours.`
+          : p.owner && p.owner !== AGRO ? `AgroCorp's trucks are heading to ${player(s, p.owner)?.name ?? 'a rival'}'s parish ${p.name}.`
+          : `AgroCorp's trucks are heading to ${p.name}. Feed it first to keep them out.`, 'warn');
+      }
+    }
   }
   drawMini() {
     const mini = this.mini, g = mini.getContext('2d')!, r = this.r;
@@ -472,7 +554,7 @@ export class UI {
   private renderDash(force = false) {
     // don't swap the buttons out from under a finger that's pressing one
     if (!force && this.pressedIn('#dash-body')) return;
-    const h = dashboardHTML(this.s, this.game.me, this.flows, (pid) => this.game.connected?.(pid) ?? true, (pid) => this.game.caretaken?.(pid) ?? false);
+    const h = dashboardHTML(this.s, this.game.me, this.flows, (pid) => this.game.connected?.(pid) ?? true, (pid) => this.game.caretaken?.(pid) ?? false, (pid) => this.game.isBot?.(pid) ?? false);
     if (force || h !== this.lastDash) { $('#dash-body').innerHTML = h; this.lastDash = h; }
   }
   /** Sends each idle worker to the nearest breadfruit tree or fishing spot. */

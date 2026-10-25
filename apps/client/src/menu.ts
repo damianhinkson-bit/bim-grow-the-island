@@ -10,7 +10,7 @@ const store = {
 export const ONLINE = import.meta.env.MODE !== 'single' && location.protocol !== 'file:';
 
 export interface MenuActions {
-  solo(d: Difficulty): void;
+  solo(d: Difficulty, bots: number): void;
   create(name: string): void;
   join(name: string, code: string): void;
   settings(m: { mode?: Mode; difficulty?: Difficulty }): void;
@@ -24,9 +24,13 @@ const DIFF_OPTS: [string, string, string][] = [['easy', 'Easy', 'Slow, lots of w
 /** Just the names, for the compact difficulty row; the hint under it explains the one picked. */
 const DIFF_SMALL = DIFF_OPTS.map(([v, l]) => [v, l, ''] as [string, string, string]);
 
+const botsHint = (n: number) => n === 0 ? 'Just you against AgroCorp.' : `Race ${n === 1 ? 'one computer co-op' : `${n} computer co-ops`} to feed the island, with AgroCorp after everyone's land.`;
+
 /** The start screen and the online lobby, drawn into the overlay card. */
 export class Menu {
   private difficulty: Difficulty = 'normal';
+  /** Computer co-ops racing you in a solo game. */
+  private bots = Math.max(0, Math.min(3, Number(store.get('bim:bots') ?? 1) || 0));
   /** Players seen in the current lobby and when they first appeared. */
   private seen = new Map<string, number>();
   private baseTitle = document.title;
@@ -68,8 +72,10 @@ export class Menu {
           <div class="hlinks"><button class="linkbtn" data-go="how">How to play</button></div>
         </div>
         <div class="hstep" data-step="solo" hidden>
-          <div class="diffrow"><span class="kicker">AgroCorp</span>${seg('difficulty', DIFF_SMALL, this.difficulty)}</div>
+          <div class="diffrow">${seg('difficulty', DIFF_SMALL, this.difficulty)}</div>
           <p class="hint" id="diff-hint">${esc(diffHint(this.difficulty))}</p>
+          <div class="diffrow stack"><span class="kicker">Computer co-ops racing you</span>${seg('bots', ['0', '1', '2', '3'].map((v) => [v, v, ''] as [string, string, string]), String(this.bots))}</div>
+          <p class="hint" id="bots-hint">${esc(botsHint(this.bots))}</p>
           <button class="btn primary" id="go-solo">Start growing</button>
           <div class="hlinks"><button class="linkbtn" data-go="pick">Back</button></div>
         </div>
@@ -102,7 +108,8 @@ export class Menu {
     };
     this.card().querySelectorAll<HTMLButtonElement>('[data-go]').forEach((b) => (b.onclick = () => go(b.dataset.go!)));
     this.bindSeg('#difficulty', (v) => { this.difficulty = v as Difficulty; $('#diff-hint').textContent = diffHint(v); });
-    $('#go-solo').onclick = () => this.a.solo(this.difficulty);
+    this.bindSeg('#bots', (v) => { this.bots = Number(v); store.set('bim:bots', v); $('#bots-hint').textContent = botsHint(this.bots); });
+    $('#go-solo').onclick = () => this.a.solo(this.difficulty, this.bots);
     if (ONLINE) {
       const nm = () => { const v = $<HTMLInputElement>('#nm').value.trim(); if (v) store.set('bim:name', v); return v || 'Player'; };
       $('#go-create').onclick = () => { const n = nm(); this.waiting('Creating your game…'); this.a.create(n); };
@@ -175,9 +182,9 @@ export class Menu {
       <p class="hint">Send the invite. Your friends tap the link and press <strong>Join the game</strong>, or open the game, tap Play online and type the code.</p>
       <ul class="seats">${seats}</ul>
       ${host ? `<div class="kicker">Mode</div>${seg('mode', [['coop', 'Co-op', 'Together vs AgroCorp'], ['versus', 'Versus', 'Race each other']], l.mode)}
-        <div class="kicker">AgroCorp difficulty</div>${seg('ldiff', DIFF_SMALL, l.difficulty).replace('class="seg"', 'class="seg small"')}
+        <div class="kicker">Difficulty</div>${seg('ldiff', DIFF_SMALL, l.difficulty).replace('class="seg"', 'class="seg small"')}
         <button class="btn primary" id="m-start"${(l.mode === 'versus' && l.players.length < 2) || away.length ? ' disabled' : ''}>${away.length ? `Waiting for ${esc(away.join(' and '))} to come back…` : 'Start the game'}</button>`
-        : `<p class="sub"><strong>${modeName}</strong> · AgroCorp ${DIFFICULTY[l.difficulty].label}. Waiting for the host to start…</p>`}
+        : `<p class="sub"><strong>${modeName}</strong> · ${DIFFICULTY[l.difficulty].label}. Waiting for the host to start…</p>`}
       <button class="btn ghost" id="m-leave">Leave</button>`;
     const inviteText = `Join my game of Bim: Grow the Island! Tap the link and press Join (code ${l.code}).`;
     if (canShare) $('#share').onclick = async () => {

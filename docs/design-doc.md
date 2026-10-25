@@ -250,6 +250,14 @@ Up to **4 players** online, alongside single-player:
 - **Older iPhones (iOS 15.3 and earlier):** removed two browser features they lack, and built for older Safari.
 - **Start screen is Damian's poster** ("BARBADOS:" with heroes from the island's history and today), with "Grow the Island" under it. Two choices: Play solo or Play online; difficulty is a small Easy/Normal/Hard row. How to play sits behind a link. The poster is dimmed behind the invite and lobby screens.
 - **Fonts ship with the game** instead of loading from Google, which left the page blank on networks that block it.
+### Seeing the other side (v0.7)
+
+- **Computer co-ops in solo:** pick 0–3 on the solo screen (Oistins, Holetown, Bathsheba Co-op). They race you (versus rules) and AgroCorp is still after everyone. They gather, farm, build cisterns, advance ages, feed parishes, protect their land and upgrade houses. Paced so a game lasts about 29 min on Easy, 24 on Normal, 20 on Hard: they can't reach an age, or spread past a number of parishes, before set times.
+- **Find players:** a dot per player at the top (solo with computer co-ops, and online). Tap one to jump to that co-op and see what it's doing, its age, parishes, workers' jobs, houses, buildings and stockpile.
+- **Houses by age:** Thatch Hut 3 people (blows down easily), Chattel House 5 (handles high winds, kitchen garden), Coral Stone House 8 (hurricane-proof), Townhouse 15 (rooftop garden), Apartment Block 25. New houses are built as your age's kind; older ones are upgraded one step per age, each paid for. A co-op still houses at most 60.
+- **Building info cards:** shown while placing a building and when you tap one: what it holds, how it handles hurricanes, its extras, the cost, and what a house becomes next age.
+- **AgroCorp made visible:** white company pickups drive from its HQ to survey the parish it wants next (two when it's about to buy); cane trucks haul from its plantations to the port; its land is planted in rows of cane. A line under the top bar says what it's doing; tap it to go there. A heads-up appears when it picks a new parish.
+
 - **Not testable here:** real iPhone Safari (its engine can't be downloaded in this workspace). Test on an iPhone before a big session.
 
 ## 15. Build plan

@@ -1,6 +1,6 @@
 import {
   AGES, AGRO, BOAT_RATE, BT, MAX_AGE, fmtCost, DIFFICULTY, DUES, EAT, MAX_BOATS, NT, RES, STALL, TOURISM, TRAIN, airportOpen, drought, landmarkHolder, linked, owned, parishBuilt, player, popCap,
-  resourcesOnLand, rivalCost, roadNetwork, tcOf, workersOf,
+  resourcesOnLand, rivalCost, roadNetwork, tcOf, workersOf, HOUSES, bName, buildCost, houseLevelFor, houseUpgrade,
   type Flow, type Res, type State,
 } from '@bim/sim';
 
@@ -30,7 +30,7 @@ export class FlowTracker {
 }
 
 /** The dashboard's HTML for the local player. Buttons carry data-act values the UI handles. */
-export function dashboardHTML(s: State, me: string, tr: FlowTracker, isOn: (pid: string) => boolean = () => true, isAi: (pid: string) => boolean = () => false): string {
+export function dashboardHTML(s: State, me: string, tr: FlowTracker, isOn: (pid: string) => boolean = () => true, isAi: (pid: string) => boolean = () => false, isBot: (pid: string) => boolean = () => false): string {
   const p = player(s, me)!, ws = workersOf(s, me), cap = popCap(s, me), r = tr.rates();
   const eatPerMin = EAT * 60 * ws.length;
   // ---------- food
@@ -69,11 +69,12 @@ export function dashboardHTML(s: State, me: string, tr: FlowTracker, isOn: (pid:
     <div class="big">${ws.length}<span>of ${cap} room</span></div>
     <dl class="kv">
       <dt>Town Centre</dt><dd>houses ${BT.tc.pop}</dd>
-      <dt>Chattel houses (${doneH}${houses.length > doneH ? ` + ${houses.length - doneH} building` : ''})</dt><dd>${BT.house.pop} each · ${doneH * (BT.house.pop ?? 0)} total</dd>
+      ${HOUSES.map((h, k) => { const these = houses.filter((b) => b.done && b.lvl === k + 1); return these.length ? `<dt>${h.name}${these.length > 1 ? 's' : ''} × ${these.length}</dt><dd>${h.pop} each · ${these.length * h.pop}</dd>` : ''; }).join('')}
+      ${houses.length > doneH ? `<dt>Houses being built</dt><dd>${houses.length - doneH}</dd>` : ''}
       ${tc && tc.queue ? `<dt>Training</dt><dd>${tc.queue} queued, next in ${Math.ceil(TRAIN - tc.trainT)}s</dd>` : ''}
     </dl>
-    <p class="hint">Each new worker eats ${EAT * 60} food a minute. A Chattel House costs ${BT.house.cost.stone} stone and makes room for ${BT.house.pop} more.</p>
-    <div class="btns"><button class="btn" data-act="dash-house">Build a Chattel House</button>${tc ? `<button class="btn" data-act="dash-train"${p.res.food < 50 ? ' disabled' : ''}>Train worker<small>50 food</small></button>` : ''}</div></section>`;
+    <p class="hint">Each new worker eats ${EAT * 60} food a minute. A new ${HOUSES[houseLevelFor(s, me) - 1].name} costs ${fmtCost(buildCost(s, me, 'house'))} and makes room for ${HOUSES[houseLevelFor(s, me) - 1].pop} more.${houses.some((b) => houseUpgrade(s, b)) ? ` ${houses.filter((b) => houseUpgrade(s, b)).length} of your houses can be upgraded: tap one.` : ''}</p>
+    <div class="btns"><button class="btn" data-act="dash-house">Build a ${HOUSES[houseLevelFor(s, me) - 1].name}</button>${tc ? `<button class="btn" data-act="dash-train"${p.res.food < 50 ? ' disabled' : ''}>Train worker<small>50 food</small></button>` : ''}</div></section>`;
   // ---------- workers
   const count = { idle: 0, tree: 0, fish: 0, rock: 0, spring: 0, farm: 0, build: 0, move: 0 };
   for (const w of ws) {
@@ -100,7 +101,7 @@ export function dashboardHTML(s: State, me: string, tr: FlowTracker, isOn: (pid:
   const mine = Object.values(s.buildings).filter((b) => b.owner === me && b.done);
   const by = (t: string) => mine.filter((b) => b.type === t);
   const farms = by('farm');
-  const brow = (t: keyof typeof BT, effect: string) => (by(t).length ? `<dt>${BT[t].name} × ${by(t).length}</dt><dd>${effect}</dd>` : '');
+  const brow = (t: keyof typeof BT, effect: string) => (by(t).length ? `<dt>${bName({ type: t as never })} × ${by(t).length}</dt><dd>${effect}</dd>` : '');
   const blds = `<section class="dcard"><h4>Buildings</h4><dl class="kv">
       ${brow('farm', `${farms.filter((f) => f.worker !== null).length} farmed${farms.some((f) => f.pest > 0) ? ' · pests!' : ''}`)}
       ${brow('cistern', `+${n0(by('cistern').length * 0.5 * 60)} water/min${drought(s) ? ' (dry now)' : ''}`)}
@@ -139,7 +140,7 @@ export function dashboardHTML(s: State, me: string, tr: FlowTracker, isOn: (pid:
   const playersCard = others.length ? `<section class="dcard"><h4>Players ${incoming.length ? `<span class="pill warn">${incoming.length} offer${incoming.length > 1 ? 's' : ''}</span>` : ''}</h4>
     ${incoming.map((o) => { const f = player(s, o.from); return `<div class="offer"><p><strong style="color:${f?.color}">${f?.name}</strong> offers ${offerTxt(o)}. <span class="muted">${Math.max(0, Math.ceil(60 - (s.time - o.t)))}s left</span></p><div class="btns"><button class="btn primary" data-act="answer:${o.id}:1">Accept</button><button class="btn" data-act="answer:${o.id}:0">Decline</button></div></div>`; }).join('')}
     <ul class="plist">${others.map((q) => `<li><span><span class="sw" style="background:${q.color}"></span>${q.name}</span><span class="muted">${isOn(q.id) ? '' : `<span class="pill warn">${isAi(q.id) ? 'Away · computer playing' : 'Away'}</span> `}${AGES[q.age - 1].short} · ${owned(s, q.id)} parish${owned(s, q.id) === 1 ? '' : 'es'}</span></li>
-      <li class="pbtns"><button class="btn" data-act="offer:${q.id}">Offer trade</button>${q.team === p.team ? `<button class="btn" data-act="gift:${q.id}">Send gift</button>` : ''}</li>`).join('')}</ul>
+      ${isBot(q.id) ? '<li class="pbtns muted">Computer co-op · tap its dot at the top to see what it has built</li>' : `<li class="pbtns"><button class="btn" data-act="offer:${q.id}">Offer trade</button>${q.team === p.team ? `<button class="btn" data-act="gift:${q.id}">Send gift</button>` : ''}</li>`}`).join('')}</ul>
     ${outgoing.length ? `<p class="hint">Waiting on: ${outgoing.map((o) => `${player(s, o.to)?.name} (${offerTxt(o)})`).join('; ')}</p>` : ''}
   </section>` : '';
   // ---------- threats

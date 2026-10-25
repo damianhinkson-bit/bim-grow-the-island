@@ -232,3 +232,58 @@ describe('caretaker', () => {
     expect(me.age).toBe(1); // big decisions stay with the player
   });
 });
+
+describe('houses by age', () => {
+  it('builds the house of your age, and upgrades one step at a time once your age allows it', async () => {
+    const { HOUSES, popCap, popOf, bName, placeBlock } = await import('../src');
+    const s = createGame({ seed: 3, players: [{ name: 'A' }] });
+    const me = s.players[0], tc = tcOf(s, 'p1')!;
+    me.res.stone = 2000; me.res.bbd = 2000; me.res.food = 2000; me.res.water = 2000;
+    const spot = s.parishes[me.home].tiles.find((i) => !placeBlock(s, 'p1', 'house', i % W, (i / W) | 0))!;
+    const r = applyCommand(s, 'p1', { type: 'place', building: 'house', x: spot % W, y: (spot / W) | 0, workers: [] });
+    expect(r.ok).toBe(true);
+    const h = s.buildings[r.building!];
+    expect(bName(h)).toBe('Thatch Hut'); expect(popOf(h)).toBe(3);
+    h.done = true; h.progress = 1;
+    const before = popCap(s, 'p1');
+    expect(applyCommand(s, 'p1', { type: 'upgrade', building: h.id }).msg).toContain('Reach the');
+    me.age = 2;
+    const up = applyCommand(s, 'p1', { type: 'upgrade', building: h.id });
+    expect(up.ok).toBe(true); expect(up.msg).toContain('Chattel House');
+    expect(popCap(s, 'p1')).toBe(before + 2);
+    expect(applyCommand(s, 'p1', { type: 'upgrade', building: h.id }).ok).toBe(false); // one step per age
+    me.age = 5;
+    for (let k = 0; k < 3; k++) expect(applyCommand(s, 'p1', { type: 'upgrade', building: h.id }).ok).toBe(true);
+    expect(bName(h)).toBe('Apartment Block'); expect(popOf(h)).toBe(HOUSES[4].pop);
+    // a kitchen garden grows a little food
+    const f0 = me.flow.gain.food; for (let t = 0; t < 100; t++) step(s);
+    expect(me.flow.gain.food - f0).toBeGreaterThan(HOUSES[4].garden * 9);
+    void tc;
+  });
+});
+
+describe('computer co-ops', () => {
+  it('play a real game: gather, build, advance ages, feed parishes and upgrade houses, the same way every time', async () => {
+    const { rivalCoop, popOf, HOUSES } = await import('../src');
+    const play = () => {
+      const s = createGame({ seed: 11, mode: 'versus', players: [{ name: 'You' }, { name: 'Oistins' }, { name: 'Holetown' }] });
+      for (let t = 0; t < 12000 && !s.ended; t++) {
+        if (t % 25 === 0) for (const pid of ['p2', 'p3']) for (const c of rivalCoop(s, pid)) applyCommand(s, pid, c);
+        step(s);
+      }
+      return s;
+    };
+    const s = play();
+    for (const pid of ['p2', 'p3']) {
+      const me = s.players.find((p) => p.id === pid)!;
+      const mine = Object.values(s.buildings).filter((b) => b.owner === pid && b.done);
+      expect(me.age).toBeGreaterThanOrEqual(3);
+      expect(owned(s, pid)).toBeGreaterThanOrEqual(2);
+      expect(workersOf(s, pid).length).toBeGreaterThan(8);
+      expect(mine.filter((b) => b.type === 'house').length).toBeGreaterThan(1);
+      expect(mine.some((b) => b.type === 'farm')).toBe(true);
+      expect(mine.some((b) => b.type === 'house' && popOf(b) > HOUSES[0].pop)).toBe(true);
+    }
+    expect(stateHash(play())).toBe(stateHash(s));
+  }, 60000);
+});

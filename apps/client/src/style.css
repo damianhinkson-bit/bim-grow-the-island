@@ -20,7 +20,7 @@ body{background:var(--sea);color:var(--fg);font-family:var(--body);-webkit-user-
 .chip.warn{border-color:var(--warn);color:#FFD9BF;background:rgba(90,30,8,.92)}
 .chip.dry{border-color:#E7B45A;color:#FFE7B8}
 .dot{width:9px;height:9px;border-radius:50%;flex:none}
-.d-food{background:var(--leaf)}.d-water{background:var(--water)}.d-stone{background:var(--stone)}.d-bbd{background:var(--gold)}.d-pop{background:#F2A7C3}
+.d-food{background:var(--leaf)}.d-water{background:var(--water)}.d-stone{background:var(--stone)}.d-bbd{background:var(--gold)}.d-pop{background:#F2A7C3}.d-agro{background:var(--rival)}
 .rivalbar{width:44px;height:6px;border-radius:3px;background:rgba(255,255,255,.15);overflow:hidden}
 .rivalbar i{display:block;height:100%;background:var(--rival);width:0}
 #mini{align-self:flex-end;pointer-events:auto;width:84px;height:114px;border-radius:10px;border:1px solid var(--line);background:var(--ink);touch-action:none}
@@ -151,7 +151,10 @@ body{background:var(--sea);color:var(--fg);font-family:var(--body);-webkit-user-
 .muted{color:var(--muted);font-weight:400}
 .plist .pbtns{justify-content:flex-start;gap:6px;margin-bottom:6px}
 .plist .pbtns .btn{padding:6px 10px;font-size:12.5px}
-.pdot{width:11px;height:11px;border-radius:50%;border:1.5px solid rgba(255,255,255,.7);position:relative}
+.pdot{width:11px;height:11px;border-radius:50%;border:1.5px solid rgba(255,255,255,.7);position:relative;padding:0;font:inherit;cursor:pointer;pointer-events:auto}
+/* a bigger invisible target round each small dot, for thumbs */
+button.pdot::before{content:'';position:absolute;inset:-8px -4px}
+#s-players{pointer-events:auto;gap:9px}
 .pdot.off{opacity:.35}
 .pdot.off::after{content:"";position:absolute;left:-2px;right:-2px;top:50%;height:1.5px;background:#fff;transform:rotate(-40deg)}
 .pdot.ai{width:auto;min-width:11px;height:13px;border-radius:7px;padding:0 3px;font-size:8px;font-weight:800;line-height:11px;color:#071330;opacity:.8}
@@ -197,6 +200,8 @@ body{background:var(--sea);color:var(--fg);font-family:var(--body);-webkit-user-
 .diffrow{display:flex;align-items:center;gap:10px;margin-bottom:6px}
 .diffrow .kicker{margin:0;color:#F6E3B8}
 .diffrow .seg{flex:1;margin:0}
+.diffrow.stack{flex-direction:column;align-items:stretch;gap:5px;margin-top:4px}
+.diffrow.stack .seg{grid-template-columns:repeat(4,1fr)}
 .seg.small .seg-b,.diffrow .seg-b{padding:7px 4px;font-size:13px;border-radius:999px}
 .diffrow .seg-b{background:rgba(0,0,0,.3);border-color:rgba(233,181,74,.55)}
 .diffrow .seg-b.on{background:var(--gold);border-color:var(--gold)}
@@ -212,3 +217,17 @@ body{background:var(--sea);color:var(--fg);font-family:var(--body);-webkit-user-
   .presents{display:none}
   .hbottom{align-self:center;padding:16px max(16px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 12px) 24px}
 }
+
+/* what AgroCorp is doing, under the status chips */
+.chip.agro{border-color:rgba(226,85,63,.55);max-width:100%;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+.chip.agro #s-agro-t{overflow:hidden;text-overflow:ellipsis}
+.chip.agro.warn{border-color:var(--rival);background:rgba(110,22,12,.94);color:#FFD9D2;animation:agroPulse 1.2s ease-in-out infinite}
+@keyframes agroPulse{50%{box-shadow:0 0 0 3px rgba(226,85,63,.35)}}
+@media (prefers-reduced-motion:reduce){.chip.agro.warn{animation:none}}
+
+/* building fact cards */
+.info{margin:2px 0 8px}
+.info .about{margin:0 0 6px;color:var(--fg);font-size:13.5px}
+.info .facts dd{text-align:right;white-space:normal}
+.info .next{margin:6px 0 0;font-size:12.5px;color:var(--muted)}
+.info .next strong{color:var(--gold)}

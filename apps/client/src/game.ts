@@ -1,4 +1,4 @@
-import { DT, applyCommand, createGame, step, type CmdResult, type Command, type Difficulty, type GameEvent, type Mode, type State } from '@bim/sim';
+import { DT, applyCommand, createGame, rivalCoop, step, type CmdResult, type Command, type Difficulty, type GameEvent, type Mode, type State } from '@bim/sim';
 
 /**
  * The client talks to a game through this interface. LocalGame runs the simulation in the browser;
@@ -20,7 +20,14 @@ export interface GameSession {
   connected?(pid: string): boolean;
   /** Online only: whether the computer is looking after a player's co-op. */
   caretaken?(pid: string): boolean;
+  /** Solo: whether a player is a computer co-op. */
+  isBot?(pid: string): boolean;
 }
+
+/** Names for the computer co-ops in a solo game: towns around the island. */
+export const BOT_NAMES = ['Oistins Co-op', 'Holetown Co-op', 'Bathsheba Co-op'];
+/** How often a computer co-op thinks, in ticks (3 s). */
+const BOT_EVERY = 30;
 
 export class LocalGame implements GameSession {
   state: State;
@@ -30,10 +37,21 @@ export class LocalGame implements GameSession {
   private prev = new Map<number, { x: number; y: number }>();
   private lastSeq = 0;
 
-  constructor(opts: { seed?: number; mode?: Mode; players?: number; difficulty?: Difficulty } = {}) {
-    const n = opts.players ?? 1;
-    this.state = createGame({ seed: opts.seed ?? (Date.now() % 2147483647), mode: opts.mode ?? 'coop', difficulty: opts.difficulty ?? 'normal', players: Array.from({ length: n }, (_, k) => ({ name: k === 0 ? 'You' : `Player ${k + 1}` })) });
+  /** Player ids run by the computer. */
+  readonly bots: string[];
+  /**
+   * A game in this browser. With computer co-ops it's a race (versus): they gather, build, advance and feed parishes
+   * like a player would, and AgroCorp is still after everyone's land.
+   */
+  constructor(opts: { seed?: number; mode?: Mode; players?: number; difficulty?: Difficulty; bots?: number } = {}) {
+    const bots = Math.max(0, Math.min(3, opts.bots ?? 0)), n = bots ? 1 + bots : opts.players ?? 1;
+    this.state = createGame({
+      seed: opts.seed ?? (Date.now() % 2147483647), mode: bots ? 'versus' : opts.mode ?? 'coop', difficulty: opts.difficulty ?? 'normal',
+      players: Array.from({ length: n }, (_, k) => ({ name: k === 0 ? 'You' : bots ? BOT_NAMES[k - 1] : `Player ${k + 1}` })),
+    });
+    this.bots = bots ? this.state.players.slice(1).map((p) => p.id) : [];
   }
+  isBot(pid: string) { return this.bots.includes(pid); }
   get alpha() { return Math.min(1, this.acc / DT); }
   send(c: Command): CmdResult { return applyCommand(this.state, this.me, c); }
   prevPos(id: number) { return this.prev.get(id); }
@@ -44,6 +62,11 @@ export class LocalGame implements GameSession {
     while (this.acc >= DT && n < 6) {
       this.prev.clear();
       for (const w of Object.values(this.state.workers)) this.prev.set(w.id, { x: w.x, y: w.y });
+      // each computer co-op thinks every 3 s, on its own beat
+      this.bots.forEach((pid, k) => {
+        if ((this.state.tick + k * 10) % BOT_EVERY) return;
+        for (const c of rivalCoop(this.state, pid)) { try { applyCommand(this.state, pid, c); } catch { /* skip a bad move */ } }
+      });
       step(this.state); this.acc -= DT; n++;
     }
     if (n === 6) this.acc = 0;
