@@ -98,6 +98,7 @@ export class Menu {
             <li><strong>Money (BBD)</strong> comes from co-op dues in every parish you feed, and from selling food.</li>
             <li>Drag to pan. Pinch or scroll to zoom.</li>
           </ul>
+          <button class="btn" id="tips-again">Show the step-by-step tips in my next game</button>
           <div class="hlinks"><button class="linkbtn" data-go="pick">Back</button></div>
         </div>
         <p class="credit">Parish borders: geoBoundaries / Wikimedia Commons, CC BY 2.5.</p>
@@ -110,6 +111,7 @@ export class Menu {
     this.bindSeg('#difficulty', (v) => { this.difficulty = v as Difficulty; $('#diff-hint').textContent = diffHint(v); });
     this.bindSeg('#bots', (v) => { this.bots = Number(v); store.set('bim:bots', v); $('#bots-hint').textContent = botsHint(this.bots); });
     $('#go-solo').onclick = () => this.a.solo(this.difficulty, this.bots);
+    $('#tips-again').onclick = () => { try { localStorage.removeItem('bim:coach-done'); } catch { /* blocked */ } $('#tips-again').textContent = 'Done. The tips will show in your next game.'; };
     if (ONLINE) {
       const nm = () => { const v = $<HTMLInputElement>('#nm').value.trim(); if (v) store.set('bim:name', v); return v || 'Player'; };
       $('#go-create').onclick = () => { const n = nm(); this.waiting('Creating your game…'); this.a.create(n); };

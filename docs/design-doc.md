@@ -258,6 +258,14 @@ Up to **4 players** online, alongside single-player:
 - **Building info cards:** shown while placing a building and when you tap one: what it holds, how it handles hurricanes, its extras, the cost, and what a house becomes next age.
 - **AgroCorp made visible:** white company pickups drive from its HQ to survey the parish it wants next (two when it's about to buy); cane trucks haul from its plantations to the port; its land is planted in rows of cane. A line under the top bar says what it's doing; tap it to go there. A heads-up appears when it picks a new parish.
 
+### Clearer screen (v0.8), from Stacey's first look
+
+- **Top bar explains itself:** icons for food, water, coral stone and people. Tap any item (stock, age, hurricane, parishes, AgroCorp) for a pop-up under it: what it is, where it comes from, what uses it, gain and use per minute, and a button for the obvious next step. The item lights up gold while its pop-up is open.
+- **Money has its own badge**, gold, top right above the minimap, with income per minute. Sales and big purchases float up as +20 / −80.
+- **What you tap is linked to the panel:** the selected worker, building, resource or parish glows gold and pulses on the map; the panel gets the same gold edge and its icon, plus a button to bring it back into view. An arrow at the screen edge points to it when it's off screen. "Go there" now centres things in the open map between the top bar and the panel.
+- **Slimmer top area:** status chips are short ("Foraging 1/5", "4:59"), the AgroCorp line and Solo label are gone (AgroCorp's details are in its pop-up).
+- **Guided first steps:** pick a worker, gather food, train a worker, cut stone, build a home, check your money. A bouncing gold pointer shows what to tap and the button to press pulses. Skippable, shown once; How to play can turn it back on.
+
 - **Not testable here:** real iPhone Safari (its engine can't be downloaded in this workspace). Test on an iPhone before a big session.
 
 ## 15. Build plan

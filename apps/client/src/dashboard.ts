@@ -21,11 +21,11 @@ export class FlowTracker {
   }
   reset() { this.samples = []; }
   /** Per-minute rates over the window, or null until there are a few seconds of data. */
-  rates(): { gain: Record<Res, number>; upkeep: Record<Res, number>; eaten: number } | null {
+  rates(): { gain: Record<Res, number>; upkeep: Record<Res, number>; spent: Record<Res, number>; eaten: number } | null {
     if (this.samples.length < 4) return null;
     const a = this.samples[0], b = this.samples[this.samples.length - 1], k = 60 / Math.max(1, b.t - a.t);
     const per = (x: Record<Res, number>, y: Record<Res, number>) => Object.fromEntries(RES.map((r) => [r, (y[r] - x[r]) * k])) as Record<Res, number>;
-    return { gain: per(a.f.gain, b.f.gain), upkeep: per(a.f.upkeep, b.f.upkeep), eaten: (b.f.eaten - a.f.eaten) * k };
+    return { gain: per(a.f.gain, b.f.gain), upkeep: per(a.f.upkeep, b.f.upkeep), spent: per(a.f.spent, b.f.spent), eaten: (b.f.eaten - a.f.eaten) * k };
   }
 }
 

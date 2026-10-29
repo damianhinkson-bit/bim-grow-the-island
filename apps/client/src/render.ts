@@ -50,6 +50,10 @@ export class Renderer {
   private townLabels: Text[] = [];
   private agroLabel!: Text;
   private ownVer = -1;
+  /** The guide's pointer: a tile to point at, or null. */
+  coachTile: { x: number; y: number } | null = null;
+  /** How much of the screen the top bar and the bottom panel cover, so "go there" centres things in the open map. */
+  insetTop = 0; insetBottom = 0;
   private time = 0;
 
   /** Called if the phone's graphics memory gives out, so the game can say so instead of showing a black screen. */
@@ -120,7 +124,12 @@ export class Renderer {
     this.z = Math.max(0.55, Math.min(2.6, this.z * f));
     this.cam.x = wx - sx / this.z; this.cam.y = wy - sy / this.z; this.clampCam();
   }
-  centerOn(tx: number, ty: number) { this.cam.x = tx * T - this.vw / this.z / 2; this.cam.y = ty * T - this.vh / this.z / 2; this.clampCam(); }
+  centerOn(tx: number, ty: number) {
+    const top = Math.min(this.insetTop, this.vh * 0.4), bottom = Math.min(this.insetBottom, this.vh * 0.55);
+    this.cam.x = tx * T - this.vw / this.z / 2;
+    this.cam.y = ty * T - (top + (this.vh - top - bottom) / 2) / this.z;
+    this.clampCam();
+  }
 
   frame(game: GameSession, view: View, dt: number) {
     const s = game.state;
@@ -143,6 +152,7 @@ export class Renderer {
     this.drawAbove(s, view, game);
     this.drawLabels(s);
     this.drawFx(s);
+    this.drawSelArrow(s, view);
   }
 
   /**
@@ -221,7 +231,7 @@ export class Renderer {
     const sel = view.sel;
     if (sel?.kind === 'parish') {
       const p = s.parishes[sel.id]; const pts = p.poly.map((v) => v * T);
-      g.poly(pts).fill({ color: 0xffffff, alpha: 0.16 }).stroke({ width: 2 / this.z, color: 0xffffff });
+      g.poly(pts).fill({ color: 0xffc726, alpha: 0.12 }).stroke({ width: 3 / this.z, color: 0xffc726 });
     }
     if (s.agro.warned && s.agro.target !== null) {
       const pts = s.parishes[s.agro.target].poly.map((v) => v * T), pulse = 0.55 + 0.45 * Math.sin(this.time * 5);
@@ -362,14 +372,27 @@ export class Renderer {
       if (b.pest > 0) for (let k = 0; k < 6; k++) { const an = k * 1.7 + this.time * 3; g.circle(x + 12 + Math.cos(an) * 7, y + 12 + Math.sin(an * 1.3) * 7, 1.4).fill(0x2a1a10); }
       if (b.hp < b.maxHp) { const f = b.hp / b.maxHp; bar(x, y - 5, w, f, f > 0.5 ? 0x6cc24a : f > 0.25 ? 0xffb03a : 0xe2553f); }
     }
-    const sel = view.sel;
-    if (sel?.kind === 'building') { const b = s.buildings[sel.id]; if (b) g.rect(b.x * T + 0.5, b.y * T + 0.5, b.w * T - 1, b.h * T - 1).stroke({ width: 2, color: 0xffffff }); }
-    if (sel?.kind === 'node') { const n = s.nodes[sel.id]; if (n) g.circle((n.x + 0.5) * T, (n.y + 0.5) * T, 12).stroke({ width: 1.5, color: 0xffffff }); }
+    // whatever is selected glows gold and pulses, the same gold as the panel that describes it
+    const sel = view.sel, pulse = RM ? 0.8 : 0.5 + 0.5 * Math.sin(this.time * 4.5), GOLD = 0xffc726;
+    const box = (x: number, y: number, w: number, h: number) => {
+      g.roundRect(x - 3, y - 3, w + 6, h + 6, 5).stroke({ width: 6 / Math.max(this.z, 0.8), color: GOLD, alpha: 0.18 + 0.22 * pulse });
+      g.roundRect(x - 1, y - 1, w + 2, h + 2, 4).stroke({ width: 2.2, color: GOLD });
+    };
+    const selB = sel?.kind === 'building' ? s.buildings[sel.id] : sel?.kind === 'player' ? Object.values(s.buildings).find((b) => b.owner === sel.id && b.type === 'tc') : undefined;
+    if (selB) box(selB.x * T, selB.y * T, selB.w * T, selB.h * T);
+    if (sel?.kind === 'node') {
+      const n = s.nodes[sel.id];
+      if (n) { const cx = (n.x + 0.5) * T, cy = (n.y + 0.5) * T; g.circle(cx, cy, 15 + 2 * pulse).stroke({ width: 5, color: GOLD, alpha: 0.18 + 0.22 * pulse }); g.circle(cx, cy, 13).stroke({ width: 2.2, color: GOLD }); }
+    }
     const ids = sel?.kind === 'workers' ? sel.ids : null;
     for (const w of Object.values(s.workers)) {
       const p = this.workerPos(w.id); if (!p) continue;
       const x = p.x * T, y = p.y * T;
-      if (ids?.has(w.id)) g.ellipse(x, y + 5, 8, 3.6).stroke({ width: 1.6, color: 0xffffff });
+      if (ids?.has(w.id)) {
+        g.ellipse(x, y + 5, 9, 4.2).stroke({ width: 4, color: GOLD, alpha: 0.2 + 0.25 * pulse }).ellipse(x, y + 5, 8, 3.6).stroke({ width: 2, color: GOLD });
+        // a little bobbing marker over each selected worker (when only a few are selected)
+        if (ids.size <= 12) { const by = y - 17 - 2 * pulse; g.poly([x - 4, by - 4, x + 4, by - 4, x, by + 1.5]).fill(GOLD).stroke({ width: 1, color: 0x5a3f00 }); }
+      }
       if (w.working && !RM) {
         const an = Math.sin(this.time * 10 + w.id) * 0.9, f = w.face || 1;
         g.moveTo(x + 4 * f, y - 2).lineTo(x + (4 + Math.cos(an) * 6) * f, y - 2 - Math.sin(an) * 6).stroke({ width: 1.6, color: 0x4a3420 });
@@ -377,8 +400,39 @@ export class Renderer {
       if (w.amt >= 1) g.circle(x - (w.face || 1) * 5, y - 3, 3).fill(w.carry === 'food' ? 0x6cc24a : w.carry === 'water' ? 0x5bc0eb : 0xe7e0cc).stroke({ width: 1, color: 0x000000, alpha: 0.4 });
     }
     for (const p of this.particles) g.rect(p.x - 1.6, p.y - 1.6, 3.2, 3.2).fill({ color: p.c, alpha: Math.min(1, p.life * 1.5) });
+    // the guide's bouncing pointer over the thing to tap next
+    if (this.coachTile) {
+      const x = this.coachTile.x * T, bob = RM ? 0 : Math.abs(Math.sin(this.time * 3.2)) * 7, y = this.coachTile.y * T - 26 - bob;
+      g.circle(this.coachTile.x * T, this.coachTile.y * T, 14 + (RM ? 0 : Math.sin(this.time * 3.2) * 2)).stroke({ width: 2.5, color: 0xffc726, alpha: 0.75 });
+      g.poly([x - 9, y - 10, x + 9, y - 10, x + 9, y - 2, x + 14, y - 2, x, y + 11, x - 14, y - 2, x - 9, y - 2]).fill(0xffc726).stroke({ width: 2, color: 0x3a2a00 });
+    }
     for (const m of view.marks) g.circle(m.x * T, m.y * T, (1 - m.t / 0.7) * 10 + 4).stroke({ width: 2, color: 0xffc726, alpha: m.t / 0.7 });
     void game;
+  }
+
+  /** Where the selection is, in tiles: the middle of a building, worker group, resource or parish. */
+  selCenter(s: State, view: View): { x: number; y: number } | null {
+    const sel = view.sel; if (!sel) return null;
+    if (sel.kind === 'building') { const b = s.buildings[sel.id]; return b ? { x: b.x + b.w / 2, y: b.y + b.h / 2 } : null; }
+    if (sel.kind === 'node') { const n = s.nodes[sel.id]; return n ? { x: n.x + 0.5, y: n.y + 0.5 } : null; }
+    if (sel.kind === 'parish') { const p = s.parishes[sel.id]; return { x: p.lx, y: p.ly }; }
+    if (sel.kind === 'player') { const b = Object.values(s.buildings).find((q) => q.owner === sel.id && q.type === 'tc'); return b ? { x: b.x + 1, y: b.y + 1 } : null; }
+    let sx = 0, sy = 0, n = 0;
+    for (const id of sel.ids) { const p = this.workerPos(id); if (p) { sx += p.x; sy += p.y; n++; } }
+    return n ? { x: sx / n, y: sy / n } : null;
+  }
+  /** When the selected thing is off screen, a gold arrow at the edge points the way to it. */
+  private drawSelArrow(s: State, view: View) {
+    const at = this.selCenter(s, view); if (!at || view.sel?.kind === 'parish') return;
+    const sx = (at.x * T - this.cam.x) * this.z, sy = (at.y * T - this.cam.y) * this.z;
+    const top = Math.max(60, this.insetTop + 10), bottom = Math.min(this.vh - 60, this.vh - this.insetBottom - 10), m = 26;
+    if (sx > m && sx < this.vw - m && sy > top && sy < bottom) return;
+    const cx = this.vw / 2, cy = (top + bottom) / 2, dx = sx - cx, dy = sy - cy;
+    const k = Math.min((this.vw / 2 - m) / Math.abs(dx || 1e-6), ((bottom - top) / 2) / Math.abs(dy || 1e-6));
+    const ax = cx + dx * k, ay = cy + dy * k, an = Math.atan2(dy, dx), pulse = RM ? 0 : Math.sin(this.time * 5) * 3;
+    const px = ax - Math.cos(an) * pulse, py = ay - Math.sin(an) * pulse;
+    const pt = (r: number, a: number) => [px + Math.cos(an + a) * r, py + Math.sin(an + a) * r];
+    this.fx.poly([...pt(14, 0), ...pt(11, 2.5), ...pt(4, Math.PI), ...pt(11, -2.5)]).fill(0xffc726).stroke({ width: 2, color: 0x3a2a00 });
   }
 
   private drawLabels(s: State) {

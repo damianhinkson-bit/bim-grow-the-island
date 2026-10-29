@@ -6,6 +6,9 @@ import {
 } from '@bim/sim';
 import { FlowTracker, dashboardHTML } from './dashboard';
 import { infoCard } from './info';
+import { ICON, type IconName } from './icons';
+import { popContent, type PopKind } from './hudpop';
+import { Coach, type CoachView } from './coach';
 import type { GameSession } from './game';
 import type { Renderer, View } from './render';
 import { T } from './terrain';
@@ -40,7 +43,7 @@ export class UI {
   constructor(private game: GameSession, private r: Renderer, private onEnd: () => void) {
     this.bindPanel(); this.bindBar(); this.bindInput(); this.bindKeys(); this.bindDash();
   }
-  setGame(game: GameSession) { this.seenAge = 1; this.storyShown = false; this.flows.reset(); this.closeDash(); this.game = game; this.view = { sel: null, buildMode: null, marks: [], roadMode: false, roadDraft: new Set() }; this.menu = null; this.lastPanel = ''; this.hudCache = {}; this.lastAgroTarget = game.state.agro.target; }
+  setGame(game: GameSession) { this.seenAge = 1; this.storyShown = false; this.flows.reset(); this.closeDash(); this.game = game; this.view = { sel: null, buildMode: null, marks: [], roadMode: false, roadDraft: new Set() }; this.menu = null; this.lastPanel = ''; this.hudCache = {}; this.lastAgroTarget = game.state.agro.target; this.closePop(); this.moneyLast = -1; }
 
   private get s(): State { return this.game.state; }
   private get me() { return player(this.s, this.game.me)!; }
@@ -68,6 +71,8 @@ export class UI {
     this.flows.sample(this.s, this.game.me);
     if (this.dashOpen) { this.dashT -= dt; if (this.dashT <= 0) { this.dashT = 0.5; this.renderDash(); } }
     this.panelT -= dt; if (this.panelT <= 0) { this.panelT = 0.25; this.renderPanel(); }
+    this.popT -= dt; if (this.popT <= 0) { this.popT = 0.5; this.refreshPop(); }
+    this.coachT -= dt; if (this.coachT <= 0) { this.coachT = 0.25; this.updateCoach(); this.measureInsets(); }
     this.miniT -= dt; if (this.miniT <= 0) { this.miniT = 0.3; this.drawMini(); }
     if (this.s.ended && this.running) this.end();
   }
@@ -137,6 +142,7 @@ export class UI {
     else if (a === 'money') { this.menu = this.menu === 'money' ? null : 'money'; this.view.buildMode = null; }
     else if (a === 'repair' && sel?.kind === 'building') this.send({ type: 'repair', building: sel.id });
     else if (a === 'upgrade' && sel?.kind === 'building') this.send({ type: 'upgrade', building: sel.id });
+    else if (a === 'locate') { const at = this.r.selCenter(s, this.view); if (at) this.r.centerOn(at.x, at.y); }
     else if (a === 'claim' && sel?.kind === 'parish') this.send({ type: 'claim', parish: sel.id });
     this.renderPanel(true);
   }
@@ -278,7 +284,14 @@ export class UI {
   private panelHeld = false;
   renderPanel(force = false) {
     if (this.panelHeld && !force) return;
-    const h = this.panelHTML();
+    let h = this.panelHTML();
+    // when the panel is about something on the map, it wears the same gold as the highlight on the map, with that
+    // thing's icon and a button to bring it into view
+    const sel = this.view.sel, linked = !!sel && !this.menu && !this.view.buildMode && !this.view.roadMode;
+    if (linked) h = h.replace('<h3>', `<h3 class="linked-h">${this.selIcon()}<button class="locate" data-act="locate" aria-label="Show it on the map" title="Show it on the map">${ICON.locate}</button>`);
+    this.panel.classList.toggle('linked', linked);
+    // while the guide is showing, it takes the place of the empty "nothing selected" panel
+    this.panel.hidden = !!this.coachView && !sel && !this.menu && !this.view.buildMode && !this.view.roadMode;
     if (h === this.lastPanel) return;
     const sameView = h.slice(0, 40) === this.lastPanel.slice(0, 40), top = this.panel.scrollTop;
     this.panel.innerHTML = h; this.lastPanel = h;
@@ -311,18 +324,33 @@ export class UI {
   }
   private bindBar() {
     $('#b-build').onclick = () => { if (this.running) this.act('build'); };
-    $('#c-bbd').onclick = () => { if (this.running) this.act('money'); };
+    // icons into the top bar, then: tap any item there to open a pop-up explaining it
+    document.querySelectorAll<HTMLElement>('[data-ic]').forEach((el) => { el.outerHTML = ICON[el.dataset.ic as IconName] ?? ''; });
+    document.querySelectorAll<HTMLElement>('[data-pop]').forEach((el) => {
+      el.setAttribute('aria-haspopup', 'dialog');
+      el.onclick = () => { if (!this.running) return; if (this.pop?.kind === el.dataset.pop) this.closePop(); else this.openPop(el.dataset.pop as PopKind, el); };
+    });
+    $('#pop').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-act]'); if (!b || b.disabled) return;
+      const a = b.dataset.act!;
+      if (a === 'pop-agro') { const s = this.s, id = s.agro.target ?? AGRO_HOME, p = s.parishes[id]; this.r.centerOn(p.lx, p.ly); this.view.sel = { kind: 'parish', id }; this.closePop(); this.renderPanel(true); return; }
+      this.act(a);
+      if (a.startsWith('place:')) this.closePop(); else this.refreshPop();
+    });
+    // tapping anywhere else closes it
+    document.addEventListener('pointerdown', (e) => {
+      if (!this.pop) return;
+      const t = e.target as HTMLElement;
+      if (t.closest('#pop') || t.closest('[data-pop]')) return;
+      this.closePop();
+    }, true);
+    addEventListener('resize', () => this.placePop());
+    addEventListener('keydown', (e) => { if (e.key === 'Escape' && this.pop) { const el = this.pop.el; this.closePop(); el.focus(); } });
     $('#s-players').onclick = (e) => {
       const pid = (e.target as HTMLElement).closest<HTMLElement>('[data-pid]')?.dataset.pid; if (!pid || !this.running) return;
       const tc = tcOf(this.s, pid), p = player(this.s, pid);
       if (tc) this.r.centerOn(tc.x + 1, tc.y + 1); else if (p) this.r.centerOn(this.s.parishes[p.home].lx, this.s.parishes[p.home].ly);
       this.view.sel = { kind: 'player', id: pid }; this.menu = null; this.view.buildMode = null; this.renderPanel(true);
-    };
-    // show where AgroCorp is working: the parish it wants next, or its home
-    $('#s-agro').onclick = () => {
-      if (!this.running) return;
-      const s = this.s, id = s.agro.target ?? AGRO_HOME, p = s.parishes[id];
-      this.r.centerOn(p.lx, p.ly); this.view.sel = { kind: 'parish', id }; this.renderPanel(true);
     };
     $('#b-all').onclick = () => { if (!this.running) return; this.view.sel = { kind: 'workers', ids: new Set(workersOf(this.s, this.game.me).map((w) => w.id)) }; this.menu = null; this.view.buildMode = null; this.renderPanel(true); };
     $('#b-idle').onclick = () => {
@@ -425,15 +453,19 @@ export class UI {
     this.setT('r-food', String(Math.floor(me.res.food))); this.setT('r-water', String(Math.floor(me.res.water)));
     this.setT('r-stone', String(Math.floor(me.res.stone))); this.setT('r-bbd', String(Math.floor(me.res.bbd)));
     this.setT('r-bbd-rate', `+${Math.round(DUES * owned(s, me.id) * 60)}/min`);
-    this.setT('r-pop', `${workersOf(s, me.id).length}/${popCap(s, me.id)}`);
+    this.moneyFx(me.res.bbd);
+    const ws = workersOf(s, me.id).length, cap = popCap(s, me.id);
+    this.setT('r-pop', `${ws}/${cap}`);
+    $('#c-pop').classList.toggle('warn', ws >= cap);
+    $('#c-food').classList.toggle('warn', !!me.hungry);
     const nextAge = AGES[me.age];
-    this.setT('s-age', me.ageT >= 0 && nextAge ? `${nextAge.short} Age in ${Math.ceil(nextAge.time - me.ageT)}s` : `${AGES[me.age - 1].name} · ${me.age}/${MAX_AGE}`);
+    this.setT('s-age', me.ageT >= 0 && nextAge ? `${nextAge.short} in ${Math.ceil(nextAge.time - me.ageT)}s` : `${AGES[me.age - 1].short} ${me.age}/${MAX_AGE}`);
     const left = s.weather.nextHurr - s.time;
-    this.setT('s-hurr', s.weather.stormT > 0 ? 'Hurricane!' : `Hurricane ${fmtT(left)}`);
-    $('#s-hurr').classList.toggle('warn', left < 60 || s.weather.stormT > 0);
-    const dr = drought(s); $('#s-dry').hidden = !dr; if (dr) this.setT('s-dry', `Drought ${fmtT(s.weather.droughtUntil - s.time)}`);
+    this.setT('s-hurr', s.weather.stormT > 0 ? 'Now!' : fmtT(left));
+    $('#c-hurr').classList.toggle('warn', left < 60 || s.weather.stormT > 0);
+    const dr = drought(s); $('#s-dry-c').hidden = !dr; if (dr) this.setT('s-dry', fmtT(s.weather.droughtUntil - s.time));
     const mine = s.mode === 'coop' ? teamOwned(s, me.team) : owned(s, me.id);
-    this.setT('s-par', `You ${mine}/${winTarget(s)} · AgroCorp ${owned(s, AGRO)}/6`);
+    this.setT('s-par', `${mine}/${winTarget(s)}`);
     // one dot per player (online, or with computer co-ops), faded and struck through while they're away. Tap one to
     // go to that co-op and see what they've built.
     const pl = $('#s-players');
@@ -446,10 +478,100 @@ export class UI {
       if (this.hudCache['s-players'] !== html) { this.hudCache['s-players'] = html; pl.innerHTML = html; pl.setAttribute('aria-label', 'Players: ' + s.players.map((p) => `${p.name}${(this.game.connected?.(p.id) ?? true) ? '' : ' away'}`).join(', ')); }
       pl.hidden = false;
     } else pl.hidden = true;
-    $('#s-solo').hidden = !!this.game.online;
+
     $('#s-rival').style.width = Math.min(100, (s.agro.bbd / rivalCost(s)) * 100) + '%';
     this.agroStatus();
   }
+  /** The icon for whatever is selected, shown in the panel header next to the gold highlight on the map. */
+  private selIcon(): string {
+    const sel = this.view.sel; if (!sel) return '';
+    if (sel.kind === 'workers') return ICON.worker;
+    if (sel.kind === 'building') return ICON.house;
+    if (sel.kind === 'parish') return ICON.parish;
+    if (sel.kind === 'player') return ICON.players;
+    const n = this.s.nodes[sel.id];
+    return n?.type === 'spring' ? ICON.water : n?.type === 'rock' ? ICON.stone : n?.type === 'fish' ? ICON.food : ICON.tree;
+  }
+
+  // ---------- guided first steps
+  private coach = new Coach();
+  private coachT = 0;
+  private coachView: CoachView | null = null;
+  private coachEl: HTMLElement | null = null;
+  private coachKey = '';
+  /** Tell the map how much of the screen is covered at the top and bottom right now. */
+  private measureInsets() {
+    const left = document.querySelector('.hud-left')?.getBoundingClientRect();
+    let top = innerHeight;
+    for (const id of ['#coach', '#panel', '#bar']) { const el = document.querySelector<HTMLElement>(id); if (el && !el.hidden) top = Math.min(top, el.getBoundingClientRect().top); }
+    this.r.insetTop = left ? left.bottom : 0; this.r.insetBottom = Math.max(0, innerHeight - top);
+  }
+  private updateCoach() {
+    const cv = this.running ? this.coach.update(this.s, this.me, this.view, this.pop?.kind ?? null) : null;
+    this.coachView = cv;
+    this.r.coachTile = cv?.tile ?? null;
+    const el = cv?.el ? document.querySelector<HTMLElement>(cv.el) : null;
+    if (el !== this.coachEl) { this.coachEl?.classList.remove('coach-pulse'); el?.classList.add('coach-pulse'); this.coachEl = el; }
+    const box = $('#coach');
+    if (!cv) { if (!box.hidden) { box.hidden = true; this.renderPanel(true); } return; }
+    const key = `${cv.step}:${cv.title}:${cv.text}`;
+    if (key !== this.coachKey) {
+      this.coachKey = key;
+      const dots = Array.from({ length: cv.total }, (_, k) => `<i class="${k < cv.step - 1 || cv.step === cv.total && cv.title.startsWith('You') ? 'done' : k === cv.step - 1 ? 'now' : ''}"></i>`).join('');
+      box.innerHTML = `<div class="coach-top"><span class="coach-dots" aria-label="Step ${cv.step} of ${cv.total}">${dots}</span><button class="linkbtn" data-coach="skip">${cv.title.startsWith('You') ? 'Close' : 'Skip tips'}</button></div><strong>${cv.title}</strong><p>${cv.text}</p>`;
+      (box.querySelector('[data-coach="skip"]') as HTMLButtonElement).onclick = () => { this.coach.skip(); this.updateCoach(); };
+    }
+    // smaller while a panel is open, so the two don't fill the screen
+    box.classList.toggle('compact', !this.panel.hidden);
+    if (box.hidden) { box.hidden = false; this.renderPanel(true); }
+  }
+
+  // ---------- top-bar pop-ups
+  private pop: { kind: PopKind; el: HTMLElement } | null = null;
+  private popT = 0;
+  private openPop(kind: PopKind, el: HTMLElement) {
+    this.pop?.el.classList.remove('active');
+    this.pop = { kind, el }; el.classList.add('active'); el.setAttribute('aria-expanded', 'true');
+    $('#pop').hidden = false; this.refreshPop();
+  }
+  closePop() {
+    if (!this.pop) return;
+    this.pop.el.classList.remove('active'); this.pop.el.setAttribute('aria-expanded', 'false');
+    this.pop = null; $('#pop').hidden = true;
+  }
+  private refreshPop() {
+    if (!this.pop) return;
+    const html = popContent(this.pop.kind, { s: this.s, me: this.me, rates: this.flows.rates() });
+    const body = $('#pop-body'); if (body.innerHTML !== html) body.innerHTML = html;
+    this.placePop();
+  }
+  /** Under the item it explains, with its arrow pointing at it, kept on screen. */
+  private placePop() {
+    if (!this.pop) return;
+    const pop = $('#pop'), r = this.pop.el.getBoundingClientRect(), vw = innerWidth;
+    const w = Math.min(330, vw - 24), cx = r.left + r.width / 2;
+    const left = Math.max(12, Math.min(vw - w - 12, cx - w / 2));
+    pop.style.width = w + 'px'; pop.style.left = left + 'px'; pop.style.top = r.bottom + 9 + 'px';
+    pop.style.maxHeight = Math.max(160, innerHeight - r.bottom - 24) + 'px';
+    ($('#pop .pop-arrow') as HTMLElement).style.left = Math.max(14, Math.min(w - 14, cx - left)) - 7 + 'px';
+  }
+
+  /** Money changes worth noticing (a sale, a big purchase) float up from the money badge; the steady dues don't. */
+  private moneyLast = -1; private moneyT = 0;
+  private moneyFx(bbd: number) {
+    const now = performance.now() / 1000;
+    if (this.moneyLast < 0) { this.moneyLast = bbd; this.moneyT = now; return; }
+    if (now - this.moneyT < 0.4) return;
+    const change = bbd - this.moneyLast; this.moneyLast = bbd; this.moneyT = now;
+    if (Math.abs(change) < 5) return; // dues add a couple of BBD in that time
+    const fx = document.createElement('span');
+    fx.className = 'bbd-delta ' + (change > 0 ? 'up' : 'down');
+    fx.textContent = (change > 0 ? '+' : '−') + Math.round(Math.abs(change));
+    $('#bbd-fx').appendChild(fx); setTimeout(() => fx.remove(), 1600);
+    const badge = $('#c-bbd'); badge.classList.remove('flash-up', 'flash-down'); void badge.offsetWidth;
+    badge.classList.add(change > 0 ? 'flash-up' : 'flash-down');
+  }
+
   /** What another co-op has built and is doing: shown when you tap their dot at the top. */
   private playerHTML(pid: string): string {
     const s = this.s, p = player(s, pid); if (!p) { this.view.sel = null; return this.panelHTML(); }
@@ -484,14 +606,9 @@ export class UI {
   private lastAgroTarget: number | null = null;
   private agroStatus() {
     const s = this.s, ag = s.agro, d = DIFFICULTY[s.difficulty];
-    let txt: string;
-    if (s.time < d.grace) txt = `AgroCorp is setting up · buying starts in ${fmtT(d.grace - s.time)}`;
-    else if (ag.target !== null) {
-      const p = s.parishes[ag.target], pct = Math.min(99, Math.floor((ag.bbd / rivalPrice(s)) * 100));
-      const yours = p.owner === this.game.me ? 'your parish ' : '';
-      txt = ag.warned ? `AgroCorp is about to buy ${yours}${p.name} · ${pct}%` : `AgroCorp is surveying ${yours}${p.name} · ${pct}% saved`;
-    } else txt = owned(s, AGRO) >= 2 ? 'AgroCorp is hauling cane to the port' : 'AgroCorp is looking for land';
-    this.setT('s-agro-t', txt);
+    // short in the bar (how much it owns, or the parish it's about to buy); the full story is in its pop-up
+    void d;
+    this.setT('s-agro-t', ag.warned && ag.target !== null ? `Buying ${s.parishes[ag.target].name}!` : `${owned(s, AGRO)}/6`);
     $('#s-agro').classList.toggle('warn', !!ag.warned);
     if (ag.target !== this.lastAgroTarget) {
       const was = this.lastAgroTarget; this.lastAgroTarget = ag.target;
@@ -594,7 +711,7 @@ export class UI {
   }
   /** Outcome of one of my online commands, arriving with the server tick that applied it. */
   result(r: { ok: boolean; msg?: string }) { if (r.msg) this.toast(r.msg, r.ok ? undefined : 'warn'); }
-  start() { $('#overlay').hidden = true; this.running = true; if (!this.game.online) this.game.paused = false; this.showPaused(false); this.renderPanel(true); }
+  start() { this.coach.start(this.s, this.game.me); this.coachEl = null; $('#overlay').hidden = true; this.running = true; if (!this.game.online) this.game.paused = false; this.showPaused(false); this.renderPanel(true); }
   stop() { this.running = false; this.closeDash(); }
   private end() {
     this.running = false;
