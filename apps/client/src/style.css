@@ -322,3 +322,18 @@ button.pdot::before{content:'';position:absolute;inset:-8px -4px}
 .news-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
 .news-list li{display:flex;align-items:center;gap:8px;font-size:13px;line-height:1.35}
 .news-list li .btn{margin-left:auto;flex:none;padding:6px 10px;font-size:12px}
+
+/* ---------- building pictures in the panel ---------- */
+.bpic{display:block;width:100%;max-width:360px;height:112px;object-fit:cover;object-position:50% 70%;border-radius:12px;margin:2px 0 8px;border:1px solid var(--line);background:#7FC8F0;image-rendering:auto}
+.bpic-wrap{position:relative;max-width:360px;margin:2px 0 8px}
+.bpic-wrap .bpic{margin:0}
+.bpic-cap{position:absolute;left:8px;bottom:8px;background:rgba(10,24,60,.82);color:var(--gold);font-weight:800;font-size:12px;padding:3px 8px;border-radius:999px;border:1px solid rgba(255,199,38,.5)}
+#panel .about{color:var(--muted);font-size:13px;margin:0 0 8px}
+.sub-h{margin:12px 0 6px;font-size:12px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}
+.cando{list-style:none;margin:0 0 10px;padding:0;display:flex;flex-direction:column;gap:7px}
+.cando li{display:flex;gap:9px;align-items:flex-start;font-size:13.5px;line-height:1.35}
+.cando li .ic{width:18px;height:18px;margin-top:1px}
+.nextlook{display:flex;gap:10px;align-items:center;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:8px;margin-bottom:8px}
+.bpic-sm{width:110px;flex:none;aspect-ratio:176/96;border-radius:8px}
+.nextlook p{margin:0;font-size:12.5px;line-height:1.35;color:var(--muted)}
+.nextlook strong{color:var(--fg)}

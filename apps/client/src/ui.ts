@@ -1,11 +1,12 @@
 import {
-  AGES, AGRO, AGRO_HOME, DIFFICULTY, MAX_AGE, BOAT_COST, BOAT_RATE, BT, BUILD_LIST, DEALS, DUES, MAX_BOATS, NT, RELIEF, ROAD_COST, STALL, TOURISM, TRAIN, W,
+  AGES, AGRO, AGRO_HOME, DIFFICULTY, MAX_AGE, BOAT_COST, BOAT_RATE, BT, BUILD_LIST, DEALS, DUES, MAX_BOATS, NT, RELIEF, ROAD_COST, STALL, TOURISM, TRAIN, TRAIN_COST, W,
   airportOpen, aquaPowered, canAfford, claimBlock, claimCost, dealTerms, drought, fmtCost, landmarkHolder, linked, owned,
   parishBuilt, player, popCap, protectedB, rivalCost, rivalPrice, tcOf, HOUSES, bName, buildCost, houseLevelFor, houseUpgrade, teamOwned, winTarget, workersOf,
-  type BType, type GameEvent, type Command, type DealId, type Landmark, type Res, type State, type Worker,
+  type BType, type Building, type GameEvent, type Command, type DealId, type Landmark, type Res, type State, type Worker,
 } from '@bim/sim';
 import { FlowTracker, dashboardHTML } from './dashboard';
-import { infoCard } from './info';
+import { TC_LOOKS, infoCard } from './info';
+import { buildingPicture } from './sprites';
 import { ICON, type IconName } from './icons';
 import { popContent, type PopKind } from './hudpop';
 import { Coach, type CoachView } from './coach';
@@ -224,28 +225,22 @@ export class UI {
       const ownerName = mine ? '' : ` <span class="tag t-free">${player(s, b.owner)?.name ?? 'AgroCorp'}</span>`;
       if (!b.done) return `<h3>${name}${ownerName}</h3><p>Under construction: ${Math.floor(b.progress * 100)}%. Select workers and tap it to help build.</p><div class="btns">${this.btn('deselect', 'Close')}</div>`;
       let info = d.desc, btns = '';
-      if (b.type === 'tc' && mine) {
-        info = `Trains workers. ${b.queue ? `Training ${b.queue} (next in ${Math.ceil(TRAIN - b.trainT)}s${workersOf(s, me.id).length >= popCap(s, me.id) ? ', needs a house' : ''}).` : ''}`;
-        btns += this.btn('train', 'Train worker', '50 food', { primary: true, disabled: me.res.food < 50 || b.queue >= 5 });
-        btns += this.btn('stall-food', `Sell ${STALL.food} food`, `+${STALL.bbd} BBD`, { disabled: me.res.food < STALL.food });
-        if (me.age < MAX_AGE) {
-          const next = AGES[me.age];
-          btns += me.ageT >= 0 ? this.btn('noop', `Entering ${next.short} Age…`, `${Math.ceil(next.time - me.ageT)}s left`, { disabled: true })
-            : this.btn('age', `Advance to ${next.short} Age`, `${fmtCost(next.cost)} · unlocks ${next.unlocks.charAt(0).toLowerCase()}${next.unlocks.slice(1)}`, { disabled: !canAfford(me.res, next.cost) });
-        }
-      }
+      // every building shows a picture of itself; the Town Centre gets the full story
+      const owner = player(s, b.owner), ownerAge = owner?.age ?? 3;
+      const pic = (age: number, cls = 'bpic') => `<img class="${cls}" alt="" src="${buildingPicture(b.type, b.variant, { age: b.type === 'house' ? b.lvl : age, color: owner?.color ?? '#E2553F' })}">`;
+      if (b.type === 'tc') return this.tcHTML(b, pic, ownerName);
       if (b.type === 'market' && mine) btns += this.btn('sell-food', 'Sell 100 food', '+50 BBD', { disabled: me.res.food < 100 }) + this.btn('sell-stone', 'Sell 100 stone', '+40 BBD', { disabled: me.res.stone < 100 }) + this.btn('buy-water', 'Truck in 100 water', '50 BBD', { disabled: me.res.bbd < 50 });
       if (b.type === 'farm') info = `${b.worker !== null ? 'Being farmed.' : 'No farmer. Select a worker and tap this plot.'}${b.pest > 0 ? ` Pests: ${Math.ceil(b.pest)}s left.` : ''}${me.res.water < 1 ? ' Out of water, so growth is slow.' : ''}`;
       if (b.type === 'aqua') info = aquaPowered(s, b) ? 'Powered by solar. +2 food/s.' : 'No solar array within 5 tiles, so it runs at half speed.';
       if (mine && b.hp < b.maxHp) { const c = Math.ceil((b.maxHp - b.hp) * 0.25); btns += this.btn('repair', 'Repair', `${c} stone`, { disabled: me.res.stone < c }); }
       const proof = b.type === 'house' && HOUSES[b.lvl - 1].wind === 2;
-      const hp = `Condition ${Math.round((b.hp / b.maxHp) * 100)}%.${b.type !== 'seawall' && b.type !== 'tc' && !proof ? (protectedB(s, b) ? ' Shielded from hurricanes by a seawall or windbreak.' : '') : ''}`;
+      const hp = `Condition ${Math.round((b.hp / b.maxHp) * 100)}%.${b.type !== 'seawall' && !proof ? (protectedB(s, b) ? ' Shielded from hurricanes by a seawall or windbreak.' : '') : ''}`;
       if (b.type === 'house' && mine) {
         const up = houseUpgrade(s, b);
         if (up) { const n = HOUSES[up.to - 1]; btns = this.btn('upgrade', `Upgrade to ${n.name}`, `${fmtCost(up.cost)} · holds ${n.pop}`, { primary: true, disabled: !canAfford(me.res, up.cost) }) + btns; }
       }
       const card = info === d.desc ? infoCard(b.type, b.lvl) : `<p>${info}</p>${infoCard(b.type, b.lvl).replace(/<p class="about">.*?<\/p>/, '')}`;
-      return `<h3>${name}${ownerName}</h3>${card}<p class="hint">${hp}</p><div class="btns">${btns}${this.btn('deselect', 'Close')}</div>`;
+      return `<h3>${name}${ownerName}</h3>${pic(ownerAge)}${card}<p class="hint">${hp}</p><div class="btns">${btns}${this.btn('deselect', 'Close')}</div>`;
     }
     if (sel.kind === 'player') return this.playerHTML(sel.id);
     if (sel.kind === 'parish') {
@@ -489,6 +484,49 @@ export class UI {
     $('#s-rival').style.width = Math.min(100, (s.agro.bbd / rivalCost(s)) * 100) + '%';
     this.agroStatus();
   }
+  /** The Town Centre: a picture of it as it looks in this age, what it's doing, what it can do, and what's next. */
+  private tcHTML(b: Building, pic: (age: number, cls?: string) => string, ownerName: string): string {
+    const s = this.s, me = this.me, mine = b.owner === this.game.me, owner = player(s, b.owner)!, age = owner.age;
+    const look = TC_LOOKS[age - 1], ws = workersOf(s, owner.id), cap = popCap(s, owner.id);
+    const caption = `<span class="bpic-cap">${AGES[age - 1].name} · ${age} of ${MAX_AGE}</span>`;
+    let status = '';
+    if (mine) {
+      if (b.queue) status = `Training ${b.queue} worker${b.queue > 1 ? 's' : ''}: next in ${Math.ceil(TRAIN - b.trainT)}s${ws.length >= cap ? ', but you need a house first' : ''}.`;
+      else status = ws.length >= cap ? `${ws.length} of ${cap} people: build or upgrade a house to train more.` : `${ws.length} of ${cap} people. Room to train ${cap - ws.length} more.`;
+      if (me.ageT >= 0 && AGES[me.age]) status += ` Moving into the ${AGES[me.age].name}: ${Math.ceil(AGES[me.age].time - me.ageT)}s left.`;
+    }
+    let btns = '';
+    if (mine) {
+      btns += this.btn('train', 'Train worker', `${TRAIN_COST.food} food`, { primary: true, disabled: me.res.food < (TRAIN_COST.food ?? 50) || b.queue >= 5 });
+      btns += this.btn('stall-food', `Sell ${STALL.food} food`, `+${STALL.bbd} BBD`, { disabled: me.res.food < STALL.food });
+      if (me.age < MAX_AGE) {
+        const next = AGES[me.age];
+        btns += me.ageT >= 0 ? this.btn('noop', `Entering ${next.short} Age…`, `${Math.ceil(next.time - me.ageT)}s left`, { disabled: true })
+          : this.btn('age', `Advance to ${next.short} Age`, fmtCost(next.cost), { disabled: !canAfford(me.res, next.cost) });
+      }
+      if (b.hp < b.maxHp) { const c = Math.ceil((b.maxHp - b.hp) * 0.25); btns += this.btn('repair', 'Repair', `${c} stone`, { disabled: me.res.stone < c }); }
+    }
+    const can = [
+      [ICON.people, `<strong>Trains workers</strong> for ${TRAIN_COST.food} food each, one every ${TRAIN}s, up to 5 queued.`],
+      [ICON.food, `<strong>Drop-off point:</strong> workers bring food, water and coral stone here.`],
+      [ICON.house, `<strong>Homes ${BT.tc.pop} people.</strong> Houses make room for more.`],
+      [ICON.bbd, `<strong>Market stall:</strong> sell ${STALL.food} food for ${STALL.bbd} BBD.`],
+      [ICON.age, `<strong>Advances your co-op</strong> to the next age, which unlocks new buildings and better houses.`],
+    ];
+    const next = AGES[age];
+    const nextHTML = next ? `<div class="nextlook">${pic(age + 1, 'bpic-sm')}<p><strong>Next: ${TC_LOOKS[age].name}</strong> in the ${next.name}. ${next.unlocks}</p></div>`
+      : '<p class="hint">Your co-op has reached the final age.</p>';
+    return `<h3>${mine ? look.name : `${owner.name}'s ${look.name}`}${ownerName}</h3>
+      <div class="bpic-wrap">${pic(age)}${caption}</div>
+      ${status ? `<p>${status}</p>` : ''}
+      ${btns ? `<div class="btns">${btns}</div>` : ''}
+      <p class="about">${look.about}</p>
+      <h4 class="sub-h">What it can do</h4>
+      <ul class="cando">${can.map(([ic, t]) => `<li>${ic}<span>${t}</span></li>`).join('')}</ul>
+      ${nextHTML}
+      <div class="btns">${this.btn('deselect', 'Close')}</div>`;
+  }
+
   /** The icon for whatever is selected, shown in the panel header next to the gold highlight on the map. */
   private selIcon(): string {
     const sel = this.view.sel; if (!sel) return '';

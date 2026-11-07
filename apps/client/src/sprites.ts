@@ -374,3 +374,39 @@ export const truckTex = (kind: TruckKind) => once('truck:' + kind, () => make(28
   }
   wheel(7); wheel(21);
 }));
+
+/**
+ * A small illustrated picture of a building for its panel: sky, sea, grass, the building drawn large, and a couple of
+ * workers in the owner's colour. Drawn once per look and kept as an image URL.
+ */
+const pics = new Map<string, string>();
+export function buildingPicture(type: BType, variant: number, opts: { age?: number; color?: string } = {}): string {
+  const age = opts.age ?? 3, color = opts.color ?? '#FFC726';
+  const key = `${type}:${variant % 6}:${age}:${color}`;
+  const hit = pics.get(key); if (hit) return hit;
+  const Wp = 176, Hp = 96, R = 2;
+  const c = document.createElement('canvas'); c.width = Wp * R; c.height = Hp * R;
+  const g = c.getContext('2d')!; g.scale(R, R); g.lineJoin = 'round'; g.lineCap = 'round';
+  // sky and a strip of sea
+  const sky = g.createLinearGradient(0, 0, 0, 52); sky.addColorStop(0, '#7FC8F0'); sky.addColorStop(1, '#D4F1FF');
+  g.fillStyle = sky; g.fillRect(0, 0, Wp, 52);
+  g.fillStyle = '#2E9BD6'; g.fillRect(0, 44, Wp, 9); g.fillStyle = 'rgba(255,255,255,.5)'; for (let x = 6; x < Wp; x += 22) g.fillRect(x, 47, 8, 1);
+  g.fillStyle = 'rgba(255,255,255,.85)'; for (const [x, y, r] of [[30, 14, 6], [38, 12, 7], [46, 15, 5], [132, 20, 5], [139, 18, 6]]) { g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill(); }
+  // ground, greener and tidier as the island recovers
+  const grass = age >= 3 ? '#79C255' : '#8DBB5A';
+  g.fillStyle = grass; g.beginPath(); g.moveTo(0, 56); g.quadraticCurveTo(Wp / 2, 46, Wp, 56); g.lineTo(Wp, Hp); g.lineTo(0, Hp); g.closePath(); g.fill();
+  g.fillStyle = age >= 4 ? '#C9C2B0' : '#C9A66B'; g.beginPath(); g.moveTo(Wp / 2 - 6, Hp); g.lineTo(Wp / 2 + 6, Hp); g.lineTo(Wp / 2 + 3, 82); g.lineTo(Wp / 2 - 3, 82); g.closePath(); g.fill();
+  // trees either side
+  for (const [x, y, s] of [[14, 58, 1.1], [150, 60, 1.2], [164, 66, 0.9]] as [number, number, number][]) { g.save(); g.translate(x, y); g.scale(s, s); drawNode(g, 'tree'); g.restore(); }
+  if (age >= 2 && type === 'tc') { g.save(); g.translate(18, 70); g.scale(0.9, 0.9); drawBuilding(g, 'farm', 0, { age }); g.restore(); }
+  // the building itself, large and centred
+  const big = BIG.has(type), s = big ? 1.55 : 2.6, bw = (big ? 2 * T : T) * s;
+  g.save(); g.translate(Wp / 2 - bw / 2, Hp - 10 - bw); g.scale(s, s); drawBuilding(g, type, variant, { age }); g.restore();
+  // two workers going about their day
+  for (const [x, flip] of [[Wp / 2 - bw / 2 - 16, false], [Wp / 2 + bw / 2 + 4, true]] as [number, boolean][]) {
+    g.save(); g.translate(x + (flip ? 14 : 0), Hp - 30); g.scale(flip ? -0.9 : 0.9, 0.9); drawWorker(g, color, age); g.restore();
+  }
+  const url = c.toDataURL('image/png');
+  pics.set(key, url);
+  return url;
+}

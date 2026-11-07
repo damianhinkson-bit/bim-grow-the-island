@@ -34,3 +34,12 @@ export function infoCard(type: BType, lvl = 1, opts: { cost?: Cost; showNext?: b
   }
   return `<div class="info"><p class="about">${esc(about)}</p><dl class="kv facts">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>${next}</div>`;
 }
+
+/** The Town Centre in each age: its name and a line about it. Its picture changes to match. */
+export const TC_LOOKS = [
+  { name: 'Gathering Hall', about: 'Timber and thatch round a fire pit. Where the first co-op meets and shares out the day\'s food.' },
+  { name: 'Village Hall', about: 'Timber walls and a galvanised roof. The co-op keeps its books and seed stores here.' },
+  { name: 'Coral Stone Town Hall', about: 'Thick walls of cut coral stone, built to last, with a farm plot out back.' },
+  { name: 'Green Tech Centre', about: 'Solar on the roof and a rainwater tank: the co-op runs on its own power and water.' },
+  { name: 'Co-op Hall', about: 'A market under the canopy where the whole island buys and sells what it grows.' },
+];
