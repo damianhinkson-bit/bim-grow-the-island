@@ -272,6 +272,42 @@ Up to **4 players** online, alongside single-player:
 - Each finished AgroCorp building adds 4% to its income (an unchallenged AgroCorp buys the island about 2 min sooner on Normal). Factory Farm runoff: player farm plots within 4 tiles grow at 75%. Hurricanes damage and can flatten its buildings and sites.
 - **News feed:** public headlines when a co-op feeds a parish, reaches an age or builds a Townhouse or Apartment Block, and when AgroCorp starts, finishes or loses a building. They pop up with that side's colour (one every few seconds, queued) and a tap jumps the map there; the dashboard keeps a News list with Show buttons.
 
+### Town builder (v1.0)
+
+The game is now a close-up pixel-art town builder. **The goal is to build the best town on the island before the clock runs out.**
+
+- **Two views.**
+  - *Town view*: your own 32×32-tile village by the sea, about ten tiles across on a phone, with pixel-art houses, trees, workers and buildings.
+  - *Island view*: Barbados and its parishes. Use it to feed parishes, put up co-op stands, trade at the port and airport, and tap a town's name to visit it.
+  - The Island button and the minimap switch between the two views. Tapping a player's dot visits their town.
+- **Town score (★).** It is shown in the top bar, and tapping it opens a breakdown and a leaderboard.
+  - Homes: 3 per person housed.
+  - Food grown: 1 per 50.
+  - Money earned: 1 per 25 BBD.
+  - Good looks: 4 per point. Points come from decorations, better houses, paths (1 per 4 tiles) and standing trees (1 per 2).
+  - Hurricane-proof buildings: 3 each.
+  - Ages: 25 per age.
+  - Parishes fed: 20 each.
+- **Match length.** You choose 20, 30 or 45 minutes (30 by default), in solo and in the online lobby. When time runs out, the highest score wins. AgroCorp buying 6 parishes still ends the game for everyone.
+- **New things to build.**
+  - Fishing Dock on your shore (up to 3).
+  - Rum Shop, which earns money.
+  - A Decorations tab: flower beds, coconut palms, benches, street lamps, a fountain and a bandstand.
+  - A Paths tool: 2 stone a tile. Paths speed up workers, add to good looks, and change from dirt to coral stone to paving as the ages go.
+- **Hurricanes and parishes.**
+  - Hurricanes can blow away small decorations that no windbreak shelters.
+  - A parish is guarded by a co-op stand (60 stone, 30 BBD) instead of by a building in it.
+  - AgroCorp starts with St. Lucy and St. Peter and builds on its own estate.
+- **First-minutes guide**, in order:
+  - pick a worker
+  - gather food
+  - train a worker
+  - cut coral stone
+  - build a home
+  - place a decoration
+  - check your score
+- Online protocol 5. Saves from older versions don't carry over to the new rules.
+
 - **Not testable here:** real iPhone Safari (its engine can't be downloaded in this workspace). Test on an iPhone before a big session.
 
 ## 15. Build plan
