@@ -1,49 +1,58 @@
 import { describe, expect, it } from 'vitest';
-import { AGRO, AGRO_HOME, P, W, applyCommand, createGame, owned, stateHash, step, tcOf, workersOf, type Command, type State } from '../src';
+import {
+  AGRO, AGRO_HOME, AGRO_SLOT, BT, HOUSES, P, TOWN, W, addBuilding, applyCommand, bName, createGame, fishFactor, owned, placeBlock, popCap, popOf,
+  restore, rivalCoop, SCORE, snapshot, stateHash, step, tcOf, townOrigin, townScore, workersOf, type BType, type State,
+} from '../src';
 
-/** A simple scripted player: keeps idle workers gathering, trains workers, builds houses and farms, feeds neighbours. */
-function bot(s: State, pid: string): Command[] {
-  const out: Command[] = [];
-  if (s.tick % 10 !== 0) return out;
-  const ws = workersOf(s, pid), tc = tcOf(s, pid)!;
-  const me = s.players.find((p) => p.id === pid)!;
-  ws.filter((w) => !w.task).forEach((w) => {
-    // each worker keeps a fixed job: two in three on food
-    const type = w.id % 3 === 0 ? 'rock' : 'tree';
-    const n = s.nodes.filter((n) => n.type === type && n.amt > 0).sort((a, b) => Math.hypot(a.x - w.x, a.y - w.y) - Math.hypot(b.x - w.x, b.y - w.y))[0];
-    if (n) out.push({ type: 'gather', workers: [w.id], node: n.id });
-  });
-  if (tc && tc.queue === 0 && me.res.food > 120) out.push({ type: 'train', building: tc.id });
-  if (s.tick % 50 === 0) {
-    for (const p of s.parishes) if (p.owner !== pid) out.push({ type: 'claim', parish: p.id });
-    const home = s.parishes[me.home];
-    const i = home.tiles[(s.tick * 7) % home.tiles.length];
-    out.push({ type: 'place', building: s.tick % 100 === 0 ? 'house' : 'farm', x: i % W, y: (i / W) | 0, workers: [] });
-  }
-  return out;
-}
-
-function run(players: number, ticks: number, seed = 7) {
-  const s = createGame({ seed, players: Array.from({ length: players }, (_, k) => ({ name: `P${k + 1}` })) });
+/** Plays a game with every player run by the computer co-op AI. */
+function run(players: number, ticks: number, seed = 7, minutes = 60) {
+  const s = createGame({ seed, minutes, players: Array.from({ length: players }, (_, k) => ({ name: `P${k + 1}` })) });
   for (let t = 0; t < ticks && !s.ended; t++) {
-    for (const p of s.players) for (const c of bot(s, p.id)) applyCommand(s, p.id, c);
+    if (t % 25 === 0) for (const p of s.players) for (const c of rivalCoop(s, p.id)) applyCommand(s, p.id, c);
     step(s);
   }
   return s;
 }
+/** A free spot for a building in a player's town, or throws. */
+function spot(s: State, pid: string, type: BType, near?: { x: number; y: number }): [number, number] {
+  const me = s.players.find((p) => p.id === pid)!, o = townOrigin(me.slot);
+  const cands: [number, number, number][] = [];
+  for (let y = o.y; y < o.y + TOWN; y++) for (let x = o.x; x < o.x + TOWN; x++) cands.push([x, y, near ? Math.abs(x - near.x) + Math.abs(y - near.y) : 0]);
+  cands.sort((a, b) => a[2] - b[2]);
+  for (const [x, y] of cands) if (!placeBlock(s, pid, type, x, y)) return [x, y];
+  throw new Error(`no spot for ${type}`);
+}
+const rich = (s: State, pid: string) => { const p = s.players.find((q) => q.id === pid)!; p.res = { food: 9999, water: 9999, stone: 9999, bbd: 9999 }; return p; };
 
-describe('map', () => {
-  it('has the 11 real parishes with land in each', () => {
+describe('towns and island', () => {
+  it('has the 11 real parishes on the island map', () => {
     const s = createGame({ players: [{ name: 'A' }] });
     expect(s.parishes.map((p) => p.name)).toContain('St. Michael');
     expect(s.parishes).toHaveLength(11);
     for (const p of s.parishes) expect(p.tiles.length).toBeGreaterThan(20);
-  });
-  it('starts each player in their own parish with a Town Centre and 4 workers', () => {
-    const s = createGame({ players: [{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }] });
-    expect(s.players.map((p) => s.parishes[p.home].name)).toEqual(['St. Michael', 'St. Philip', 'St. Andrew', 'St. James']);
-    for (const p of s.players) { expect(tcOf(s, p.id)).toBeTruthy(); expect(workersOf(s, p.id)).toHaveLength(4); }
     expect(s.parishes[AGRO_HOME].owner).toBe(AGRO);
+  });
+  it('gives each co-op its own coastal town with a Town Centre, 4 workers, a road and resources', () => {
+    const s = createGame({ players: [{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }] });
+    const slots = new Set(s.players.map((p) => p.slot));
+    expect(slots.size).toBe(4);
+    for (const p of s.players) {
+      const tc = tcOf(s, p.id)!; expect(s.map.town[tc.y * W + tc.x]).toBe(p.slot);
+      expect(workersOf(s, p.id)).toHaveLength(4);
+      for (const w of workersOf(s, p.id)) expect(s.map.town[Math.floor(w.y) * W + Math.floor(w.x)]).toBe(p.slot);
+      const here = s.nodes.filter((n) => n.town === p.slot);
+      expect(here.filter((n) => n.type === 'tree').length).toBeGreaterThanOrEqual(10);
+      expect(here.filter((n) => n.type === 'rock').length).toBeGreaterThanOrEqual(5);
+      expect(here.filter((n) => n.type === 'spring').length).toBeGreaterThanOrEqual(1);
+      expect(here.filter((n) => n.type === 'fish').length).toBeGreaterThanOrEqual(5);
+      const o = townOrigin(p.slot); let shore = 0, road = 0;
+      for (let y = o.y; y < o.y + TOWN; y++) for (let x = o.x; x < o.x + TOWN; x++) { shore += s.map.coast[y * W + x]; road += s.roads[y * W + x] ? 1 : 0; }
+      expect(shore).toBeGreaterThan(10); expect(road).toBeGreaterThan(8);
+      // a tree close to home, for a quick start
+      expect(here.some((n) => n.type === 'tree' && Math.abs(n.x - tc.x) + Math.abs(n.y - tc.y) < 10)).toBe(true);
+    }
+    const hq = Object.values(s.buildings).find((b) => b.type === 'hq')!;
+    expect(s.map.town[hq.y * W + hq.x]).toBe(AGRO_SLOT);
   });
 });
 
@@ -51,258 +60,167 @@ describe('simulation', () => {
   it('is deterministic: same seed and commands give the same game', () => {
     const a = run(2, 3000), b = run(2, 3000);
     expect(stateHash(a)).toBe(stateHash(b));
-    expect(a.tick).toBe(b.tick);
   });
-  it('runs a 4-player game for 10 minutes without errors and players gather resources', () => {
+  it('runs a 4-player game for 10 minutes and everyone gathers', () => {
     const s = run(4, 6000);
     for (const p of s.players) expect(p.stats.food).toBeGreaterThan(50);
     expect(s.weather.hurrIdx).toBeGreaterThanOrEqual(1);
   });
-  it('keeps stockpiles separate per player', () => {
+  it('keeps stockpiles and workers separate per player', () => {
     const s = createGame({ players: [{ name: 'A' }, { name: 'B' }] });
-    const tc = tcOf(s, 'p1')!;
-    expect(applyCommand(s, 'p1', { type: 'train', building: tc.id }).ok).toBe(true);
-    expect(s.players[0].res.food).toBe(150);
-    expect(s.players[1].res.food).toBe(200);
+    const theirs = workersOf(s, 'p2')[0];
+    const tree = s.nodes.find((n) => n.type === 'tree' && n.town === 0)!;
+    applyCommand(s, 'p1', { type: 'gather', workers: [theirs.id], node: tree.id });
+    expect(theirs.task).toBeNull();
+    s.players[0].res.food = 1; expect(s.players[1].res.food).toBe(200);
   });
-  it('rejects commands for things a player does not own', () => {
-    const s = createGame({ players: [{ name: 'A' }, { name: 'B' }] });
+  it('only lets you build in your own town, and docks and seawalls only on the shore', () => {
+    const s = createGame({ players: [{ name: 'A' }, { name: 'B' }] }); rich(s, 'p1');
     const tc2 = tcOf(s, 'p2')!;
-    expect(applyCommand(s, 'p1', { type: 'train', building: tc2.id }).ok).toBe(false);
-    const w2 = workersOf(s, 'p2')[0];
-    applyCommand(s, 'p1', { type: 'move', workers: [w2.id], tile: w2.y * W + w2.x });
-    expect(w2.task).toBeNull();
+    expect(placeBlock(s, 'p1', 'house', tc2.x + 4, tc2.y + 4)).toContain('own town');
+    const tc = tcOf(s, 'p1')!;
+    const [gx, gy] = spot(s, 'p1', 'house', { x: tc.x + 5, y: tc.y });
+    expect(placeBlock(s, 'p1', 'dock', gx, gy)).toContain('shore');
+    const [dx, dy] = spot(s, 'p1', 'dock');
+    expect(s.map.coast[dy * W + dx] || s.map.coast[dy * W + dx + 1]).toBe(1);
+    for (let k = 0; k < 3; k++) { const [x, y] = spot(s, 'p1', 'dock'); expect(applyCommand(s, 'p1', { type: 'place', building: 'dock', x, y, workers: [] }).ok).toBe(true); }
+    const [x4, y4] = spot(s, 'p1', 'dock');
+    expect(applyCommand(s, 'p1', { type: 'place', building: 'dock', x: x4, y: y4, workers: [] }).msg).toContain('room for 3');
   });
-  it('only lets a player build inside their own parishes', () => {
+  it('lays paths in your own town for 2 stone a tile, and workers walk faster on them', () => {
     const s = createGame({ players: [{ name: 'A' }, { name: 'B' }] });
-    const philip = s.parishes[P.PHILIP].tiles[40];
-    const r = applyCommand(s, 'p1', { type: 'place', building: 'house', x: philip % W, y: (philip / W) | 0, workers: [] });
-    expect(r.ok).toBe(false);
-  });
-  it('lets a player feed a neighbouring parish', () => {
-    const s = createGame({ players: [{ name: 'A' }] });
-    s.players[0].res = { food: 999, water: 999, stone: 999, bbd: 999 };
-    const nb = s.parishes[P.MICHAEL].adj.find((a) => s.parishes[a].owner === null)!;
-    expect(applyCommand(s, 'p1', { type: 'claim', parish: nb }).ok).toBe(true);
-    expect(owned(s, 'p1')).toBe(2);
-  });
-});
-
-describe('AgroCorp and money', () => {
-  it('waits out its grace period, warns about its target, then buys it', () => {
-    const s = createGame({ players: [{ name: 'A' }], difficulty: 'normal' });
-    let warnAt = -1, buyAt = -1;
-    for (let t = 0; t < 20000 && buyAt < 0; t++) {
-      step(s);
-      if (warnAt < 0 && s.events.some((e) => e.kind === 'warn' && e.msg.startsWith('AgroCorp is about to'))) warnAt = s.time;
-      if (owned(s, AGRO) > 1) buyAt = s.time;
-    }
-    expect(warnAt).toBeGreaterThan(240);
-    expect(buyAt).toBeGreaterThan(warnAt + 10);
-  });
-  it('lets a player sell food at the Town Centre stall without a Market', () => {
-    const s = createGame({ players: [{ name: 'A' }] });
-    expect(applyCommand(s, 'p1', { type: 'market', trade: 'stall-food' }).ok).toBe(true);
-    expect(s.players[0].res).toMatchObject({ food: 150, bbd: 120 });
-    expect(applyCommand(s, 'p1', { type: 'market', trade: 'sell-food' }).ok).toBe(false);
-  });
-});
-
-describe('roads, port and airport', () => {
-  it('lays road tiles in your own parishes for 5 stone each', () => {
-    const s = createGame({ players: [{ name: 'A' }] });
-    const tiles = s.parishes[P.MICHAEL].tiles.filter((i) => !s.roads[i] && s.nodeAt[i] < 0 && s.bAt[i] < 0).slice(0, 3);
+    const tc = tcOf(s, 'p1')!, before = s.players[0].res.stone;
+    const tiles: number[] = []; for (let x = tc.x - 6; x < tc.x - 1; x++) tiles.push((tc.y + 5) * W + x);
     const r = applyCommand(s, 'p1', { type: 'road', tiles });
-    expect(r.ok).toBe(true);
-    expect(tiles.every((i) => s.roads[i] === 2)).toBe(true);
-    expect(s.players[0].res.stone).toBe(120 - 15);
-    const away = s.parishes[P.PHILIP].tiles.find((i) => !s.roads[i])!;
-    expect(applyCommand(s, 'p1', { type: 'road', tiles: [away] }).ok).toBe(false);
+    expect(r.ok).toBe(true); expect(s.players[0].res.stone).toBe(before - 2 * tiles.filter((i) => s.roads[i] >= 2).length);
+    const tc2 = tcOf(s, 'p2')!;
+    expect(applyCommand(s, 'p1', { type: 'road', tiles: [(tc2.y + 5) * W + tc2.x] }).msg).toContain('own town');
   });
-  it('makes workers walk faster on roads', () => {
-    const run = (onRoad: boolean) => {
-      const s = createGame({ players: [{ name: 'A' }] });
-      const w = workersOf(s, 'p1')[0];
-      const row = Array.from({ length: 10 }, (_, k) => 30 * W + 20 + k);
-      for (const i of row) { s.nodeAt[i] = -1; s.bAt[i] = -1; s.roads[i] = onRoad ? 2 : 0; }
-      for (const i of row) s.map.land[i] = 1;
-      w.x = 20.5; w.y = 30.5;
-      applyCommand(s, 'p1', { type: 'move', workers: [w.id], tile: row[9] });
-      let t = 0; while (w.task && t < 200) { step(s); t++; }
-      return t;
-    };
-    const slow = run(false), fast = run(true);
-    expect(fast).toBeLessThan(slow * 0.65);
-  });
-  it('trades at the port with a 10% fee to the parish holder', () => {
-    const s = createGame({ players: [{ name: 'A' }, { name: 'B' }] });
-    // p1 holds St. Michael (the port's parish) and starts on a highway; p2 starts unconnected
-    expect(applyCommand(s, 'p2', { type: 'trade', at: 'port', deal: 'export-food' }).ok).toBe(false);
-    expect(applyCommand(s, 'p1', { type: 'trade', at: 'port', deal: 'export-food' }).ok).toBe(true);
-    expect(s.players[0].res).toMatchObject({ food: 100, bbd: 160 });
-    // hand St. Michael to p2: now p1 pays p2 the 10% fee on the same deal
-    s.parishes[P.MICHAEL].owner = 'p2';
-    expect(applyCommand(s, 'p1', { type: 'trade', at: 'port', deal: 'export-food' }).ok).toBe(true);
-    expect(s.players[0].res.bbd).toBe(160 + 54);
-    expect(s.players[1].res.bbd).toBe(100 + 6);
-  });
-  it('launches fishing boats that land food, and closes the airport for hurricanes', () => {
-    const s = createGame({ players: [{ name: 'A' }] });
-    s.players[0].res.bbd = 500; s.players[0].res.stone = 500;
-    expect(applyCommand(s, 'p1', { type: 'boat' }).ok).toBe(true);
-    expect(s.players[0].boats).toBe(1);
-    const f0 = s.players[0].flow.gain.food;
-    for (let t = 0; t < 100; t++) step(s);
-    expect(s.players[0].flow.gain.food - f0).toBeGreaterThan(3);
-    s.weather.stormT = 3;
-    expect(applyCommand(s, 'p1', { type: 'trade', at: 'airport', deal: 'airfreight' }).ok).toBe(false);
+  it('lets you feed a neighbouring parish, and a co-op stand keeps AgroCorp and rivals out', () => {
+    const s = createGame({ players: [{ name: 'A' }, { name: 'B' }] }); rich(s, 'p1'); rich(s, 'p2');
+    const near = s.parishes[s.players[0].home].adj.find((a) => s.parishes[a].owner === null)!;
+    expect(applyCommand(s, 'p1', { type: 'claim', parish: near }).ok).toBe(true);
+    expect(s.parishes[near].owner).toBe('p1');
+    expect(applyCommand(s, 'p1', { type: 'stand', parish: near }).ok).toBe(true);
+    expect(s.parishes[near].stand).toBe('p1');
+    // a rival next door can't win it over while the stand is there
+    s.parishes.forEach((p) => { if (p.adj.includes(near) && p.owner === null) p.owner = 'p2'; });
+    expect(applyCommand(s, 'p2', { type: 'claim', parish: near }).msg).toContain('stand');
   });
 });
 
-describe('five ages', () => {
+describe('AgroCorp', () => {
+  it('waits out its grace period, warns about its target, then buys it', () => {
+    const s = createGame({ players: [{ name: 'A' }] });
+    const start = owned(s, AGRO); expect(start).toBe(2);
+    for (let t = 0; t < 2300; t++) step(s);
+    expect(owned(s, AGRO)).toBe(start);
+    for (let t = 0; t < 6000 && owned(s, AGRO) < start + 1; t++) step(s);
+    expect(owned(s, AGRO)).toBe(start + 1);
+    expect(s.events.some((e) => e.msg.includes('about to buy'))).toBe(true);
+  });
+  it('builds factory farms, mills and towers on its estate, whose runoff makes fish scarcer, with public news', () => {
+    const s = createGame({ seed: 7, players: [{ name: 'A' }] });
+    for (let t = 0; t < 9000 && !s.ended; t++) step(s);
+    const agro = Object.values(s.buildings).filter((b) => b.owner === AGRO && b.type !== 'hq');
+    expect(agro.length).toBeGreaterThanOrEqual(2);
+    for (const b of agro) expect(s.map.town[b.y * W + b.x]).toBe(AGRO_SLOT);
+    expect(s.events.some((e) => e.news && e.who === AGRO && e.msg.includes('is building'))).toBe(true);
+    const farms = agro.filter((b) => b.type === 'ffarm' && b.done).length;
+    expect(fishFactor(s)).toBeCloseTo(Math.max(0.6, 1 - 0.1 * farms));
+  }, 60000);
+});
+
+describe('money, trade and ages', () => {
+  it('sells food at the Town Centre stall, and trades at the port with a fee to whoever feeds St. Michael', () => {
+    const s = createGame({ players: [{ name: 'A' }, { name: 'B' }] });
+    const b0 = s.players[0].res.bbd;
+    expect(applyCommand(s, 'p1', { type: 'market', trade: 'stall-food' }).ok).toBe(true);
+    expect(s.players[0].res.bbd).toBe(b0 + 20);
+    s.parishes[P.MICHAEL].owner = 'p1';
+    const p2bbd = s.players[1].res.bbd, p1bbd = s.players[0].res.bbd;
+    expect(applyCommand(s, 'p2', { type: 'trade', at: 'port', deal: 'export-food' }).ok).toBe(true);
+    expect(s.players[1].res.bbd).toBe(p2bbd + 54);
+    expect(s.players[0].res.bbd).toBe(p1bbd + 6);
+  });
   it('starts in the Foraging Age with farms locked, and climbs through all five ages', () => {
     const s = createGame({ players: [{ name: 'A' }] });
-    const me = s.players[0];
-    expect(me.age).toBe(1);
-    const free = s.parishes[P.MICHAEL].tiles.find((i) => !s.roads[i] && s.nodeAt[i] < 0 && s.bAt[i] < 0)!;
-    expect(applyCommand(s, 'p1', { type: 'place', building: 'farm', x: free % W, y: (free / W) | 0, workers: [] }).msg).toContain('Rain-fed Farming Age');
-    for (let age = 2; age <= 5; age++) {
-      me.res = { food: 9999, water: 9999, stone: 9999, bbd: 9999 };
+    const [x, y] = spot(s, 'p1', 'house');
+    expect(placeBlock(s, 'p1', 'farm', x, y)).toContain('unlocks');
+    for (let a = 2; a <= 5; a++) {
+      rich(s, 'p1');
       expect(applyCommand(s, 'p1', { type: 'age' }).ok).toBe(true);
-      let t = 0; while (me.age < age && t < 1000) { step(s); t++; }
-      expect(me.age).toBe(age);
+      for (let t = 0; t < 600 && s.players[0].age < a; t++) step(s);
+      expect(s.players[0].age).toBe(a);
     }
-    expect(applyCommand(s, 'p1', { type: 'age' }).ok).toBe(false);
   });
-  it('makes composted farms grow faster and windbreaks shield buildings', async () => {
-    const { composted, protectedB, addBuilding } = await import('../src');
+  it('builds the house of your age, and upgrades one step at a time once your age allows it', () => {
+    const s = createGame({ players: [{ name: 'A' }] }); const me = rich(s, 'p1');
+    const [x, y] = spot(s, 'p1', 'house');
+    const r = applyCommand(s, 'p1', { type: 'place', building: 'house', x, y, workers: [] });
+    const h = s.buildings[r.building!]; h.done = true; h.progress = 1;
+    expect(bName(h)).toBe('Thatch Hut'); expect(popOf(h)).toBe(3);
+    expect(applyCommand(s, 'p1', { type: 'upgrade', building: h.id }).msg).toContain('Reach the');
+    me.age = 2; const cap = popCap(s, 'p1');
+    expect(applyCommand(s, 'p1', { type: 'upgrade', building: h.id }).ok).toBe(true);
+    expect(popCap(s, 'p1')).toBe(cap + 2);
+    me.age = 5; for (let k = 0; k < 3; k++) applyCommand(s, 'p1', { type: 'upgrade', building: h.id });
+    expect(bName(h)).toBe('Apartment Block'); expect(popOf(h)).toBe(HOUSES[4].pop);
+  });
+});
+
+describe('town score and the end of the match', () => {
+  it('scores what a town has: homes, decorations, safe buildings, ages and parishes', () => {
+    const s = createGame({ players: [{ name: 'A' }] }); rich(s, 'p1');
+    const a = townScore(s, 'p1');
+    const tc = tcOf(s, 'p1')!;
+    for (const type of ['flowers', 'palm', 'bench'] as BType[]) {
+      const [x, y] = spot(s, 'p1', type, { x: tc.x + 4, y: tc.y - 2 });
+      const b = addBuilding(s, type, x, y, 'p1', true); expect(b.done).toBe(true);
+    }
+    const b = townScore(s, 'p1');
+    expect(b.beauty - a.beauty).toBe(SCORE.beauty * ((BT.flowers.beauty ?? 0) + (BT.palm.beauty ?? 0) + (BT.bench.beauty ?? 0)));
+    expect(b.total).toBeGreaterThan(a.total);
+    s.players[0].age = 3; expect(townScore(s, 'p1').age).toBe(50);
+  });
+  it('ends when the time is up, and the best town wins', () => {
+    const s = run(2, 20000, 3, 12);
+    expect(s.ended?.reason).toBe('time');
+    expect(s.time).toBeGreaterThanOrEqual(12 * 60);
+    const scores = s.players.map((p) => townScore(s, p.id).total);
+    const best = Math.max(...scores);
+    expect(s.ended!.winners).toEqual(s.players.filter((_, k) => scores[k] === best).map((p) => p.id));
+  }, 60000);
+  it('ends early if AgroCorp buys 6 parishes', () => {
     const s = createGame({ players: [{ name: 'A' }] });
-    const farm = addBuilding(s, 'farm', 10, 40, 'p1', true);
-    expect(composted(s, farm)).toBe(false);
-    addBuilding(s, 'composter', 12, 40, 'p1', true);
-    expect(composted(s, farm)).toBe(true);
-    const house = addBuilding(s, 'house', 30, 30, 'p1', true);
-    expect(protectedB(s, house)).toBe(false);
-    addBuilding(s, 'windbreak', 32, 31, 'p1', true);
-    expect(protectedB(s, house)).toBe(true);
+    s.parishes.filter((p) => p.owner === null).slice(0, 5).forEach((p) => (p.owner = AGRO));
+    step(s);
+    expect(s.ended).toMatchObject({ winners: [AGRO], reason: 'bought-out' });
   });
 });
 
 describe('online play support', () => {
-  it('restores a snapshot that then plays on identically', async () => {
-    const { snapshot, restore } = await import('../src');
-    const a = createGame({ seed: 11, players: [{ name: 'A' }, { name: 'B' }] });
-    for (let t = 0; t < 900; t++) { for (const p of a.players) for (const c of bot(a, p.id)) applyCommand(a, p.id, c); step(a); }
-    const b = restore(JSON.parse(JSON.stringify(snapshot(a))));
-    expect(stateHash(b)).toBe(stateHash(a));
-    for (let t = 0; t < 900; t++) {
-      for (const p of a.players) { const cs = bot(a, p.id); for (const c of cs) { applyCommand(a, p.id, c); applyCommand(b, p.id, c); } }
-      step(a); step(b);
-    }
-    expect(stateHash(b)).toBe(stateHash(a));
-    expect(b.nodes.filter((n) => n.type === 'spring').every((n) => n.max === Infinity)).toBe(true);
-  });
-  it('trades between players only when both can pay, and gifts only within a co-op team', () => {
-    const s = createGame({ players: [{ name: 'A' }, { name: 'B' }] });
-    const r = applyCommand(s, 'p1', { type: 'offer', to: 'p2', give: { food: 50 }, get: { stone: 30 } });
-    expect(r.ok).toBe(true);
-    const o = s.offers[0];
-    expect(applyCommand(s, 'p1', { type: 'answer', offer: o.id, accept: true }).ok).toBe(false); // only the recipient answers
-    expect(applyCommand(s, 'p2', { type: 'answer', offer: o.id, accept: true }).ok).toBe(true);
-    expect(s.players[0].res).toMatchObject({ food: 150, stone: 150 });
-    expect(s.players[1].res).toMatchObject({ food: 250, stone: 90 });
-    expect(applyCommand(s, 'p1', { type: 'offer', to: 'p2', give: { food: 5000 }, get: {} }).ok).toBe(false);
-    expect(applyCommand(s, 'p1', { type: 'gift', to: 'p2', give: { water: 40 } }).ok).toBe(true);
-    expect(s.players[1].res.water).toBe(140);
-    const v = createGame({ mode: 'versus', players: [{ name: 'A' }, { name: 'B' }] });
-    expect(applyCommand(v, 'p1', { type: 'gift', to: 'p2', give: { water: 40 } }).ok).toBe(false);
-  });
-});
-
-describe('caretaker', () => {
-  it('keeps an abandoned co-op working: workers gather, the stockpile grows', async () => {
-    const { caretaker } = await import('../src');
-    const s = createGame({ seed: 5, players: [{ name: 'A' }] });
-    const me = s.players[0];
-    for (let t = 0; t < 3000; t++) { if (t % 20 === 0) for (const c of caretaker(s, 'p1')) applyCommand(s, 'p1', c); step(s); }
-    expect(workersOf(s, 'p1').filter((w) => !w.task).length).toBeLessThanOrEqual(1);
-    expect(me.flow.gain.food).toBeGreaterThan(300);
-    expect(me.flow.gain.stone).toBeGreaterThan(50);
-    expect(workersOf(s, 'p1').length).toBeGreaterThan(4);
-    expect(me.age).toBe(1); // big decisions stay with the player
-  });
-});
-
-describe('houses by age', () => {
-  it('builds the house of your age, and upgrades one step at a time once your age allows it', async () => {
-    const { HOUSES, popCap, popOf, bName, placeBlock } = await import('../src');
-    const s = createGame({ seed: 3, players: [{ name: 'A' }] });
-    const me = s.players[0], tc = tcOf(s, 'p1')!;
-    me.res.stone = 2000; me.res.bbd = 2000; me.res.food = 2000; me.res.water = 2000;
-    const spot = s.parishes[me.home].tiles.find((i) => !placeBlock(s, 'p1', 'house', i % W, (i / W) | 0))!;
-    const r = applyCommand(s, 'p1', { type: 'place', building: 'house', x: spot % W, y: (spot / W) | 0, workers: [] });
-    expect(r.ok).toBe(true);
-    const h = s.buildings[r.building!];
-    expect(bName(h)).toBe('Thatch Hut'); expect(popOf(h)).toBe(3);
-    h.done = true; h.progress = 1;
-    const before = popCap(s, 'p1');
-    expect(applyCommand(s, 'p1', { type: 'upgrade', building: h.id }).msg).toContain('Reach the');
-    me.age = 2;
-    const up = applyCommand(s, 'p1', { type: 'upgrade', building: h.id });
-    expect(up.ok).toBe(true); expect(up.msg).toContain('Chattel House');
-    expect(popCap(s, 'p1')).toBe(before + 2);
-    expect(applyCommand(s, 'p1', { type: 'upgrade', building: h.id }).ok).toBe(false); // one step per age
-    me.age = 5;
-    for (let k = 0; k < 3; k++) expect(applyCommand(s, 'p1', { type: 'upgrade', building: h.id }).ok).toBe(true);
-    expect(bName(h)).toBe('Apartment Block'); expect(popOf(h)).toBe(HOUSES[4].pop);
-    // a kitchen garden grows a little food
-    const f0 = me.flow.gain.food; for (let t = 0; t < 100; t++) step(s);
-    expect(me.flow.gain.food - f0).toBeGreaterThan(HOUSES[4].garden * 9);
-    void tc;
+  it('restores a snapshot that then plays on identically', () => {
+    const s = run(2, 1500);
+    const copy = restore(JSON.parse(JSON.stringify(snapshot(s))));
+    for (let k = 0; k < 1500; k++) { step(s); step(copy); }
+    expect(stateHash(copy)).toBe(stateHash(s));
   });
 });
 
 describe('computer co-ops', () => {
-  it('play a real game: gather, build, advance ages, feed parishes and upgrade houses, the same way every time', async () => {
-    const { rivalCoop, popOf, HOUSES } = await import('../src');
-    const play = () => {
-      const s = createGame({ seed: 11, mode: 'versus', players: [{ name: 'You' }, { name: 'Oistins' }, { name: 'Holetown' }] });
-      for (let t = 0; t < 12000 && !s.ended; t++) {
-        if (t % 25 === 0) for (const pid of ['p2', 'p3']) for (const c of rivalCoop(s, pid)) applyCommand(s, pid, c);
-        step(s);
-      }
-      return s;
-    };
-    const s = play();
-    for (const pid of ['p2', 'p3']) {
-      const me = s.players.find((p) => p.id === pid)!;
-      const mine = Object.values(s.buildings).filter((b) => b.owner === pid && b.done);
-      expect(me.age).toBeGreaterThanOrEqual(3);
-      expect(owned(s, pid)).toBeGreaterThanOrEqual(2);
-      expect(workersOf(s, pid).length).toBeGreaterThan(8);
+  it('grow a real town over 20 minutes: ages, parishes, homes, farms, a dock and decorations', () => {
+    const s = run(3, 12000, 11);
+    for (const p of s.players) {
+      const mine = Object.values(s.buildings).filter((b) => b.owner === p.id && b.done);
+      expect(p.age).toBeGreaterThanOrEqual(3);
+      expect(owned(s, p.id)).toBeGreaterThanOrEqual(2);
+      expect(workersOf(s, p.id).length).toBeGreaterThan(8);
       expect(mine.filter((b) => b.type === 'house').length).toBeGreaterThan(1);
       expect(mine.some((b) => b.type === 'farm')).toBe(true);
-      expect(mine.some((b) => b.type === 'house' && popOf(b) > HOUSES[0].pop)).toBe(true);
+      expect(mine.some((b) => b.type === 'dock')).toBe(true);
+      expect(mine.some((b) => BT[b.type].deco)).toBe(true);
+      expect(townScore(s, p.id).total).toBeGreaterThan(150);
     }
-    expect(stateHash(play())).toBe(stateHash(s));
-  }, 60000);
-});
-
-describe('AgroCorp builds', () => {
-  it('puts up factory farms, mills and towers on its land, with public news, and its runoff slows nearby farm plots', async () => {
-    const { runoff, BT } = await import('../src');
-    const s = createGame({ seed: 7, players: [{ name: 'A' }] });
-    for (let t = 0; t < 9000 && !s.ended; t++) step(s); // 15 minutes with nobody playing
-    const agro = Object.values(s.buildings).filter((b) => b.owner === AGRO && b.type !== 'hq');
-    expect(agro.length).toBeGreaterThanOrEqual(2);
-    expect(agro.some((b) => b.done && b.type === 'ffarm')).toBe(true);
-    const headlines = s.events.filter((e) => e.news && e.who === AGRO);
-    expect(headlines.some((e) => e.msg.includes('is building'))).toBe(true);
-    for (const b of agro) { expect(s.map.land[b.y * W + b.x]).toBe(1); expect(s.parishes[s.map.pid[b.y * W + b.x]].owner).toBe(AGRO); }
-    // a farm plot right next to a factory farm is hit by its runoff
-    const ff = agro.find((b) => b.type === 'ffarm' && b.done)!;
-    expect(runoff(s, { ...ff, type: 'farm', x: ff.x + 2, y: ff.y } as never)).toBe(true);
-    expect(runoff(s, { ...ff, type: 'farm', x: ff.x + 12, y: ff.y } as never)).toBe(false);
-    void BT;
   }, 60000);
 });

@@ -1,6 +1,7 @@
 export * from './defs';
 export * from './geo';
 export * from './map';
+export * from './world';
 export * from './path';
 export * from './rng';
 export * from './sim';

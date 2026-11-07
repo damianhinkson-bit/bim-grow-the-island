@@ -1,5 +1,5 @@
-import { AGES, BT, MAX_AGE, POP_MAX, TRAIN_COST, W, canAfford, type BType, type Cost, type NodeType, type Res } from './defs';
-import { ix, iy } from './map';
+import { AGES, BT, MAX_AGE, MAX_DOCKS, POP_MAX, STAND_COST, TOWN, TRAIN_COST, W, canAfford, type BType, type Cost, type NodeType, type Res } from './defs';
+import { townOrigin } from './world';
 import { buildCost, owned, claimBlock, claimCost, dist, houseUpgrade, parishBuilt, placeBlock, player, popCap, tcOf, workersOf, type Command } from './sim';
 import type { State } from './types';
 
@@ -33,15 +33,13 @@ export function caretaker(s: State, pid: string, trainUpTo = 14, waterGoal = 80)
     const onFood = ws.filter((w) => (w.task?.k === 'gather' && ['tree', 'fish'].includes(s.nodes[w.task.n].type)) || w.task?.k === 'farm').length;
     return onFood < onStone * 2 ? 'tree' : 'rock';
   };
-  const ownLand = (n: { pid: number }) => n.pid >= 0 && s.parishes[n.pid].owner === pid;
   for (const w of idle) {
     const want = need();
     const types: NodeType[] = want === 'tree' ? ['tree', 'fish'] : [want];
     let best = -1, bd = Infinity;
     for (const n of s.nodes) {
-      if (n.amt <= 0 || !types.includes(n.type)) continue;
-      // prefer resources on our own land: count anything else as twice as far
-      const d = dist(n.x + 0.5 - w.x, n.y + 0.5 - w.y) * (ownLand(n) ? 1 : 2);
+      if (n.amt <= 0 || !types.includes(n.type) || n.town !== me.slot) continue;
+      const d = dist(n.x + 0.5 - w.x, n.y + 0.5 - w.y);
       if (d < bd) { bd = d; best = n.id; }
     }
     if (best >= 0) out.push({ type: 'gather', workers: [w.id], node: best });
@@ -56,17 +54,10 @@ export function caretaker(s: State, pid: string, trainUpTo = 14, waterGoal = 80)
     if (spot) out.push({ type: 'place', building: 'house', x: spot[0], y: spot[1], workers: [] });
   }
 
-  // 3) protect land AgroCorp is about to buy: any building there blocks a buyout
+  // 3) protect land AgroCorp is about to buy: a co-op stand there blocks a buyout
   const t = s.agro.target;
-  if (t !== null && s.agro.warned && s.parishes[t].owner === pid && !parishBuilt(s, s.parishes[t], pid)) {
-    const already = mine.some((b) => !b.done && s.map.pid[b.y * W + b.x] === t);
-    const type: BType = canAfford(me.res, buildCost(s, pid, 'house')) ? 'house' : 'depot';
-    if (!already && canAfford(me.res, buildCost(s, pid, type))) {
-      const p = s.parishes[t];
-      const spot = spotNear(s, pid, type, [p.lx, p.ly]);
-      if (spot) out.push({ type: 'place', building: type, x: spot[0], y: spot[1], workers: [] });
-    }
-  }
+  if (t !== null && s.agro.warned && s.parishes[t].owner === pid && !parishBuilt(s, s.parishes[t], pid) && canAfford(me.res, STAND_COST))
+    out.push({ type: 'stand', parish: t });
   return out;
 }
 
@@ -107,7 +98,7 @@ export function rivalCoop(s: State, pid: string): Command[] {
     for (const w of movers) {
       let best = -1, bd = Infinity;
       for (const n of s.nodes) {
-        if (n.amt <= 0 || !short[1].includes(n.type)) continue;
+        if (n.amt <= 0 || !short[1].includes(n.type) || n.town !== me.slot) continue;
         const d = dist(n.x + 0.5 - w.x, n.y + 0.5 - w.y); if (d < bd) { bd = d; best = n.id; }
       }
       if (best >= 0) out.push({ type: 'gather', workers: [w.id], node: best });
@@ -132,12 +123,14 @@ export function rivalCoop(s: State, pid: string): Command[] {
   if (best && owned(s, pid) < maxLand && spare(best.cost, { food: 100 })) { out.push({ type: 'claim', parish: best.id }); return out; }
 
   if (placing) return out;
-  // 3) keep each parish it feeds safe from AgroCorp with at least one building
+  // 3) guard each parish it feeds with a co-op stand
   for (const p of s.parishes) {
     if (p.owner !== pid || parishBuilt(s, p, pid)) continue;
-    const type: BType = spare(buildCost(s, pid, 'house'), {}) ? 'house' : 'depot';
-    if (spare(buildCost(s, pid, type), {}) && place(type, [p.lx, p.ly])) return out;
+    if (spare(STAND_COST, {})) { out.push({ type: 'stand', parish: p.id }); return out; }
   }
+  // a fishing dock early on, and more later
+  const docks = mine.filter((b) => b.type === 'dock').length;
+  if (docks < Math.min(MAX_DOCKS, me.age >= 3 ? 2 : 1) && spare(BT.dock.cost) && place('dock', home)) return out;
   // 4) farms once it can, about one for every three workers, and a cistern to water them
   const farms = mine.filter((b) => b.type === 'farm').length;
   const cisterns = mine.filter((b) => b.type === 'cistern').length;
@@ -146,24 +139,33 @@ export function rivalCoop(s: State, pid: string): Command[] {
   if (me.age >= 4 && farms >= 3 && mine.filter((b) => b.type === 'aqua').length < 2 && spare(BT.aqua.cost) && place('aqua', home)) return out;
   // 5) upgrade one old house at a time when there's plenty of stone
   const old = mine.find((b) => houseUpgrade(s, b));
-  if (old) { const up = houseUpgrade(s, old)!; if (spare(up.cost, { food: 150, stone: 80 })) out.push({ type: 'upgrade', building: old.id }); }
+  if (old) { const up = houseUpgrade(s, old)!; if (spare(up.cost, { food: 150, stone: 80 })) { out.push({ type: 'upgrade', building: old.id }); return out; } }
+  // 6) make the town nicer when there's plenty to spare: a rum shop, then decorations round the square
+  if (me.age >= 2 && !mine.some((b) => b.type === 'rumshop') && spare(BT.rumshop.cost, { food: 200, stone: 100 }) && place('rumshop', home)) return out;
+  const decos: BType[] = me.age >= 4 ? ['bandstand', 'fountain', 'palm', 'flowers', 'bench'] : me.age >= 3 ? ['fountain', 'palm', 'flowers', 'bench'] : ['palm', 'flowers', 'bench'];
+  for (const d of decos) {
+    const have = mine.filter((b) => b.type === d).length, want = d === 'bandstand' || d === 'fountain' ? 1 : 2 + me.age;
+    if (have < want && spare(BT[d].cost, { food: 200, stone: 100, water: 60 }) && place(d, home)) return out;
+  }
   return out;
 }
 
-/** The nearest valid tile for a building, searching outwards from a point (or anywhere in the player's land). */
+/**
+ * The nearest good spot for a building in the player's town, searching outwards from a point. Leaves a one-tile
+ * walkway round every building (except small decorations), so nothing gets boxed in.
+ */
 function spotNear(s: State, pid: string, type: BType, from: [number, number] | null): [number, number] | null {
+  const me = player(s, pid); if (!me) return null;
+  const o = townOrigin(me.slot), d = BT[type], small = d.w === 1 && d.h === 1;
   let best: [number, number] | null = null, bd = Infinity;
-  for (const p of s.parishes) {
-    if (p.owner !== pid) continue;
-    for (const i of p.tiles) {
-      const x = ix(i), y = iy(i);
-      if (placeBlock(s, pid, type, x, y)) continue;
-      const d = from ? dist(x + 0.5 - from[0], y + 0.5 - from[1]) : 0;
-      // keep a gap from the Town Centre so workers can get around it
-      if (from && d < 2.5) continue;
-      if (d < bd) { bd = d; best = [x, y]; }
-      if (!from) return best;
-    }
+  for (let y = o.y + 1; y < o.y + TOWN - 1; y++) for (let x = o.x; x < o.x + TOWN - 1; x++) {
+    const dd = from ? dist(x + d.w / 2 - from[0], y + d.h / 2 - from[1]) : 0;
+    if (dd >= bd || (from && dd < 3)) continue;
+    if (placeBlock(s, pid, type, x, y)) continue;
+    let clear = true;
+    if (!small) for (let yy = y - 1; yy <= y + d.h && clear; yy++) for (let xx = x - 1; xx <= x + d.w; xx++) if (s.bAt[yy * W + xx] >= 0) { clear = false; break; }
+    if (!clear) continue;
+    bd = dd; best = [x, y];
   }
   return best;
 }

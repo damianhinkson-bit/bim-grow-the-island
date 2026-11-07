@@ -1,139 +1,95 @@
 import {
-  AGES, AGRO, AGRO_BUILDS, AGRO_BUILD_BOOST, AGRO_BUILD_EVERY, RUNOFF, RUNOFF_R, COMPOST_BONUS, COMPOST_R, HUB_DUES, MAX_AGE, WINDBREAK_R, AGRO_HOME, BOAT_COST, BOAT_RATE, BT, CARRY, DEALS, DIFFICULTY, DT, DUES, EAT, FEE, MAX_BOATS, RELIEF, RES, ROAD_COST, TOURISM, H, HNAMES, STALL, MAX_PLAYERS, NT, PLAYER_COLORS, SEA_R, SPEED, START_PARISHES, START_RES,
-  TRAIN, TRAIN_COST, W, WIN_N, HOUSES, POP_MAX, canAfford, fmtCost, pay, type Cost,
+  AGES, AGRO, AGRO_BUILDS, AGRO_BUILD_BOOST, AGRO_BUILD_EVERY, AGRO_SLOT, COMPOST_BONUS, COMPOST_R, HUB_DUES, MAX_AGE, WINDBREAK_R, AGRO_HOME, BOAT_RATE, BT, CARRY, DEALS, DIFFICULTY, DT, DUES, EAT, FEE, RELIEF, RES, TOURISM, H, HNAMES, STALL, MAX_PLAYERS, NT, PLAYER_COLORS, SEA_R, SPEED, START_PARISHES, START_RES,
+  TRAIN, TRAIN_COST, W, WIN_N, HOUSES, POP_MAX, canAfford, fmtCost, pay, type Cost, TOWN, PATH_COST, MAX_DOCKS, RUNOFF_FISH, FISH_FLOOR, STAND_COST, DEFAULT_MINUTES, SCORE, SCORE_FOOD_PER, SCORE_BBD_PER, AGRO_START, P,
   type BType, type DealId, type Difficulty, type Landmark, type NodeType, type Res,
 } from './defs';
-import { buildMap, inB, ix, iy } from './map';
-import { toT } from './geo';
+import { buildIsland, inB, ix, iy } from './map';
+import { TC_LOCAL, buildWorld, townOrigin } from './world';
 import { findPath, goalTest, passable } from './path';
 import { nextRand } from './rng';
-import type { Building, Flow, GameEvent, Goal, MapData, Mode, Node, Offer, Parish, Player, State, Worker } from './types';
+import type { Building, Flow, GameEvent, Goal, IslandMap, MapData, Mode, Node, Offer, Parish, Player, State, Worker } from './types';
 
 // ---------- setup
 
-let MAP: { map: MapData; parishes: Parish[] } | null = null;
-function staticMap() { return (MAP ??= buildMap()); }
+let MAP: { map: MapData; island: IslandMap; parishes: Parish[] } | null = null;
+function staticMap() { if (!MAP) { const { island, parishes } = buildIsland(); MAP = { map: buildWorld(), island, parishes }; } return MAP; }
 
-export interface NewGameOptions { seed?: number; mode?: Mode; difficulty?: Difficulty; players: { name: string }[] }
+/** minutes: how long the match lasts; the best town score wins when it ends. */
+export interface NewGameOptions { seed?: number; mode?: Mode; difficulty?: Difficulty; minutes?: number; players: { name: string }[] }
 
 const rand = (s: State) => nextRand(s);
 /** Distance via sqrt, which every JavaScript engine computes identically (Math.hypot isn't guaranteed to), keeping phones in sync. */
 export const dist = (dx: number, dy: number) => Math.sqrt(dx * dx + dy * dy);
 
 export function createGame(o: NewGameOptions): State {
-  const { map, parishes } = staticMap();
+  const { map, island, parishes } = staticMap();
   const seed = (o.seed ?? 1031) | 0;
   const n = Math.max(1, Math.min(MAX_PLAYERS, o.players.length || 1));
+  const minutes = Math.max(5, Math.min(90, Math.round(o.minutes ?? DEFAULT_MINUTES)));
   const s: State = {
-    seed, rng: seed, tick: 0, time: 0, mode: o.mode ?? 'coop', nextId: 1, map,
-    parishes: parishes.map((p) => ({ ...p, owner: null })),
-    nodes: [], nodeAt: new Int32Array(W * H).fill(-1), bAt: new Int32Array(W * H).fill(-1), roads: map.highway.slice(), roadVersion: 1,
+    seed, rng: seed, tick: 0, time: 0, mode: o.mode ?? 'versus', nextId: 1, map, island,
+    parishes: parishes.map((p) => ({ ...p, owner: null, stand: null })),
+    nodes: [], nodeAt: new Int32Array(W * H).fill(-1), bAt: new Int32Array(W * H).fill(-1), roads: map.road.slice(), roadVersion: 1,
     buildings: {}, workers: {}, players: [], difficulty: o.difficulty ?? 'normal', agro: { bbd: 0, target: null, warned: false, nextBuild: 0 },
     weather: { nextHurr: 300, hurrWarned: false, nextDrought: 210, droughtUntil: -1, nextPest: 130, stormT: 0, hurrIdx: 0 },
-    events: [], eventSeq: 0, offers: [], parishVersion: 1, ended: null,
+    events: [], eventSeq: 0, offers: [], parishVersion: 1, ended: null, endsAt: minutes * 60,
   };
   for (let k = 0; k < n; k++) {
     const home = START_PARISHES[n - 1][k];
     s.players.push({
-      id: `p${k + 1}`, name: o.players[k]?.name || `Player ${k + 1}`, color: PLAYER_COLORS[k], team: s.mode === 'coop' ? 0 : k, home,
-      res: { ...START_RES }, age: 1, ageT: -1, stats: { food: 0 }, hungry: false, boats: 0, flow: newFlow(),
+      id: `p${k + 1}`, name: o.players[k]?.name || `Player ${k + 1}`, color: PLAYER_COLORS[k], team: s.mode === 'coop' ? 0 : k, home, slot: k,
+      res: { ...START_RES }, age: 1, ageT: -1, stats: { food: 0 }, hungry: false, flow: newFlow(),
     });
-    s.parishes[home].owner = `p${k + 1}`;
+    s.parishes[home].owner = `p${k + 1}`; s.parishes[home].stand = `p${k + 1}`;
   }
-  s.parishes[AGRO_HOME].owner = AGRO;
-
-  // landmarks first, so nothing else takes their spots
-  for (const [type, lat, lon, coast] of [['port', 13.104, -59.63, true], ['airport', 13.0752, -59.497, false]] as const) {
-    const [x, y] = landmarkSpot(s, lat, lon, coast); addBuilding(s, type, x, y, 'public', true);
-  }
-  const hq = findSpot(s, AGRO_HOME);
-  addBuilding(s, 'hq', hq[0], hq[1], AGRO, true);
-  const tcs = s.players.map((p) => { const sp = findSpot(s, p.home); addBuilding(s, 'tc', sp[0], sp[1], p.id, true); return sp; });
-  const spots = [hq, ...tcs];
-  const far = (i: number) => spots.every(([x, y]) => dist(ix(i) - (x + 0.5), iy(i) - (y + 0.5)) > 3.5);
-  const free = (i: number) => map.land[i] && !map.coast[i] && !map.urban[i] && !s.roads[i] && s.nodeAt[i] < 0 && s.bAt[i] < 0 && far(i);
-  // coral stone only on the coral cap (not the Scotland District's clay); springs in the wetter uplands
-  const ok: Record<NodeType, (i: number) => boolean> = { tree: () => true, fish: () => true, rock: (i) => map.scot[i] < 0.3, spring: (i) => map.elev[i] > 0.38 };
-  const cluster = (type: NodeType, count: number, size: number) => {
-    for (let c = 0; c < count; c++) {
-      let seedTile = -1;
-      for (let t = 0; t < 30; t++) {
-        const p = s.parishes[Math.floor(rand(s) * s.parishes.length)];
-        const j = p.tiles[Math.floor(rand(s) * p.tiles.length)];
-        if (ok[type](j)) { seedTile = j; break; }
-      }
-      if (seedTile < 0) continue;
-      for (let k = 0; k < size; k++) {
-        const x = ix(seedTile) + Math.floor(rand(s) * 3) - 1, y = iy(seedTile) + Math.floor(rand(s) * 3) - 1;
-        if (!inB(x, y)) continue; const i = y * W + x;
-        if (free(i) && ok[type](i)) addNode(s, type, i);
-      }
-    }
-  };
-  cluster('tree', 44, 4); cluster('rock', 30, 3); cluster('spring', 11, 1);
-  for (let i = 0; i < W * H; i++) if (!map.land[i] && map.depth[i] === 1 && rand(s) < 0.09) addNode(s, 'fish', i);
-
-  // guaranteed starting resources around each Town Centre
-  s.players.forEach((p, k) => {
-    const [tx, ty] = tcs[k];
-    const nearFree = (i: number) => map.land[i] && !map.coast[i] && !map.urban[i] && !s.roads[i] && s.nodeAt[i] < 0 && s.bAt[i] < 0 && dist(ix(i) - (tx + 0.5), iy(i) - (ty + 0.5)) > 3.5 && map.pid[i] === p.home;
-    const ring = (type: NodeType, rmin: number, rmax: number, cnt: number) => {
-      let tries = 0, placed = 0, anch: [number, number] | null = null;
-      const cx = tx + 1, cy = ty + 1;
-      while (placed < cnt && tries++ < 400) {
-        let x: number, y: number;
-        if (anch) { x = anch[0] + Math.floor(rand(s) * 3) - 1; y = anch[1] + Math.floor(rand(s) * 3) - 1; }
-        else { const a = rand(s) * Math.PI * 2, r = rmin + rand(s) * (rmax - rmin); x = Math.round(cx + Math.cos(a) * r); y = Math.round(cy + Math.sin(a) * r); }
-        if (!inB(x, y)) continue; const i = y * W + x;
-        if (nearFree(i)) { addNode(s, type, i); placed++; anch ??= [x, y]; }
-      }
-    };
-    ring('tree', 4, 6, 4); ring('tree', 5, 8, 3); ring('rock', 5, 8, 3); ring('spring', 4, 7, 1);
-    for (let i = 0; i < W * H; i++)
-      if (!map.land[i] && map.depth[i] === 1 && s.nodeAt[i] < 0 && dist(ix(i) - tx, iy(i) - ty) < 9 && rand(s) < 0.45) addNode(s, 'fish', i);
+  for (const id of AGRO_START) if (!s.parishes[id].owner) s.parishes[id].owner = AGRO;
+  s.parishes[AGRO_HOME].stand = AGRO;
+  const tcAt = (slot: number) => { const o = townOrigin(slot); return [o.x + TC_LOCAL.x, o.y + TC_LOCAL.y] as const; };
+  const [hx, hy] = tcAt(AGRO_SLOT); addBuilding(s, 'hq', hx, hy, AGRO, true);
+  townNodes(s, AGRO_SLOT, 0.5);
+  s.players.forEach((p) => {
+    const [x, y] = tcAt(p.slot); addBuilding(s, 'tc', x, y, p.id, true);
+    townNodes(s, p.slot, 1);
     const tc = tcOf(s, p.id)!;
     for (let w = 0; w < 4; w++) { const t = spawnTile(s, tc); if (t >= 0) spawnWorker(s, t, p.id); }
   });
   return s;
 }
 
-function findSpot(s: State, pidx: number): [number, number] {
-  const p = s.parishes[pidx], m = s.map;
-  const d = (i: number) => (ix(i) - p.lx) ** 2 + (iy(i) - p.ly) ** 2;
-  const c = p.tiles.slice().sort((a, b) => d(a) - d(b));
-  for (const i of c) {
-    const x = ix(i), y = iy(i); let good = true;
-    for (let dy = 0; dy < 2 && good; dy++) for (let dx = 0; dx < 2; dx++) {
-      if (!inB(x + dx, y + dy)) { good = false; break; }
-      const j = (y + dy) * W + x + dx;
-      if (!m.land[j] || m.coast[j] || m.urban[j] || s.roads[j] || m.pid[j] !== p.id || s.bAt[j] >= 0) { good = false; break; }
+/**
+ * A town's resources: breadfruit groves, coral rock outcrops, a spring or two, and flying fish in the shallows. Kept
+ * clear of the Town Centre, the road and the shore, with a few of each close by so the start is quick.
+ */
+function townNodes(s: State, slot: number, amount: number) {
+  const o = townOrigin(slot), m = s.map;
+  const cx = o.x + TC_LOCAL.x + 1, cy = o.y + TC_LOCAL.y + 1;
+  const free = (x: number, y: number) => {
+    if (x <= o.x || y <= o.y || x >= o.x + TOWN - 1 || y >= o.y + TOWN - 1) return false;
+    const i = y * W + x;
+    return m.land[i] === 1 && m.kind[i] === 0 && !m.road[i] && !m.road[i - W] && !m.road[i + W] && s.nodeAt[i] < 0 && s.bAt[i] < 0 && dist(x + 0.5 - cx, y + 0.5 - cy) > 3.2;
+  };
+  const cluster = (type: NodeType, count: number, size: number, rmin: number, rmax: number) => {
+    for (let c = 0; c < count; c++) {
+      let ax = -1, ay = -1;
+      for (let t = 0; t < 40 && ax < 0; t++) {
+        const a = rand(s) * Math.PI * 2, r = rmin + rand(s) * (rmax - rmin);
+        const x = Math.round(cx + Math.cos(a) * r), y = Math.round(cy + Math.sin(a) * r);
+        if (free(x, y)) { ax = x; ay = y; }
+      }
+      if (ax < 0) continue;
+      addNode(s, type, ay * W + ax);
+      for (let k = 1, tries = 0; k < size && tries < 30; tries++) {
+        const x = ax + Math.floor(rand(s) * 5) - 2, y = ay + Math.floor(rand(s) * 5) - 2;
+        if (free(x, y)) { addNode(s, type, y * W + x); k++; }
+      }
     }
-    if (good) return [x, y];
+  };
+  // a grove and a rock outcrop near the start, then more further out
+  cluster('tree', 1, 4, 4, 6); cluster('rock', 1, 3, 5, 7); cluster('spring', 1, 1, 4, 7);
+  cluster('tree', Math.round(4 * amount), 4, 6, 13); cluster('rock', Math.round(3 * amount), 3, 7, 13); cluster('spring', 1, 1, 8, 13);
+  for (let y = o.y + 1; y < o.y + TOWN - 1; y++) for (let x = o.x; x < o.x + TOWN; x++) {
+    const i = y * W + x; if (m.depth[i] === 1 && rand(s) < 0.22 * amount) addNode(s, 'fish', i);
   }
-  return [ix(c[0]), iy(c[0])];
-}
-
-/** A 2x2 spot for a landmark near a real location: on land, off the roads, next to a road (and on the coast for the port). */
-function landmarkSpot(s: State, lat: number, lon: number, needCoast: boolean): [number, number] {
-  const [tx, ty] = toT(lat, lon), m = s.map;
-  const cands: [number, number, number][] = [];
-  for (let y = Math.floor(ty) - 6; y <= ty + 6; y++) for (let x = Math.floor(tx) - 6; x <= tx + 6; x++) cands.push([x, y, dist(x + 1 - tx, y + 1 - ty)]);
-  cands.sort((a, b) => a[2] - b[2]);
-  let fallback: [number, number] | null = null;
-  for (const [x, y] of cands) {
-    let ok = true, coast = false, road = false;
-    for (let dy = 0; dy < 2 && ok; dy++) for (let dx = 0; dx < 2; dx++) {
-      if (!inB(x + dx, y + dy)) { ok = false; break; }
-      const j = (y + dy) * W + x + dx;
-      if (!m.land[j] || s.roads[j] || s.bAt[j] >= 0) { ok = false; break; }
-      if (m.coast[j]) coast = true;
-    }
-    if (!ok || (needCoast && !coast)) continue;
-    for (let yy = y - 1; yy <= y + 2 && !road; yy++) for (let xx = x - 1; xx <= x + 2; xx++) if (inB(xx, yy) && s.roads[yy * W + xx]) { road = true; break; }
-    if (road) return [x, y];
-    fallback ??= [x, y];
-  }
-  return fallback ?? [Math.floor(tx), Math.floor(ty)];
 }
 
 // ---------- stockpile bookkeeping
@@ -144,19 +100,11 @@ function newFlow(): Flow {
 }
 function spend(p: Player, c: Partial<Record<Res, number>>) { for (const k of RES) { const v = c[k] ?? 0; p.res[k] -= v; p.flow.spent[k] += v; } }
 function earn(p: Player, r: Res, v: number) { p.res[r] += v; p.flow.gain[r] += v; }
-function shoreParish(s: State, i: number): number {
-  if (s.map.land[i]) return s.map.pid[i];
-  const x = ix(i), y = iy(i);
-  for (let r = 1; r <= 2; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
-    const nx = x + dx, ny = y + dy; if (!inB(nx, ny)) continue; const j = ny * W + nx; if (s.map.land[j]) return s.map.pid[j];
-  }
-  return -1;
-}
 
 // ---------- entities
 
 export function addNode(s: State, type: NodeType, i: number): Node {
-  const n: Node = { id: s.nodes.length, type, i, x: ix(i), y: iy(i), amt: NT[type].max, max: NT[type].max, pid: shoreParish(s, i) };
+  const n: Node = { id: s.nodes.length, type, i, x: ix(i), y: iy(i), amt: NT[type].max, max: NT[type].max, town: s.map.town[i] };
   s.nodes.push(n); s.nodeAt[i] = n.id; return n;
 }
 function removeNode(s: State, n: Node) { n.amt = 0; if (s.nodeAt[n.i] === n.id) s.nodeAt[n.i] = -1; }
@@ -226,39 +174,17 @@ export function protectedB(s: State, b: Building): boolean {
 export function composted(s: State, b: Building): boolean {
   return Object.values(s.buildings).some((o) => o.type === 'composter' && o.done && o.owner === b.owner && dist(o.x - b.x, o.y - b.y) <= COMPOST_R);
 }
-/** Which player built a road tile (null for highways and empty tiles). */
+/** Which player laid a path tile (null for a town's dirt road and empty tiles). */
 export function roadOwner(s: State, i: number): Player | null { const v = s.roads[i]; return v >= 2 ? s.players[v - 2] ?? null : null; }
 export function aquaPowered(s: State, b: Building): boolean {
   return Object.values(s.buildings).some((o) => o.type === 'solar' && o.done && o.owner === b.owner && dist(o.x - b.x, o.y - b.y) <= SEA_R);
 }
-export function parishBuilt(s: State, p: Parish, owner: string): boolean {
-  return Object.values(s.buildings).some((b) => b.owner === owner && b.done && s.map.pid[b.y * W + b.x] === p.id);
-}
-/** Road tiles a player's Town Centre, Depots and Markets connect to. */
-export function roadNetwork(s: State, owner: string): Uint8Array {
-  const reach = new Uint8Array(W * H), q: number[] = [];
-  const add = (i: number) => { if (s.roads[i] && !reach[i]) { reach[i] = 1; q.push(i); } };
-  for (const b of Object.values(s.buildings)) {
-    if (b.owner !== owner || !b.done || !(b.type === 'tc' || b.type === 'depot' || b.type === 'market')) continue;
-    for (let y = b.y - 1; y <= b.y + b.h; y++) for (let x = b.x - 1; x <= b.x + b.w; x++) if (inB(x, y)) add(y * W + x);
-  }
-  for (let h = 0; h < q.length; h++) {
-    const c = q[h], x = ix(c), y = iy(c);
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if ((dx || dy) && inB(x + dx, y + dy)) add((y + dy) * W + x + dx);
-  }
-  return reach;
-}
-export const landmarkOf = (s: State, type: Landmark) => Object.values(s.buildings).find((b) => b.type === type);
-/** Whether a player's road network reaches a landmark. */
-export function linked(s: State, owner: string, type: Landmark, net = roadNetwork(s, owner)): boolean {
-  const b = landmarkOf(s, type); if (!b) return false;
-  for (let y = b.y - 1; y <= b.y + b.h; y++) for (let x = b.x - 1; x <= b.x + b.w; x++) if (inB(x, y) && net[y * W + x]) return true;
-  return false;
-}
-/** Who collects fees at a landmark: whoever holds its parish (a player id, AgroCorp, or nobody). */
-export function landmarkHolder(s: State, type: Landmark): string | null {
-  const b = landmarkOf(s, type); return b ? s.parishes[s.map.pid[b.y * W + b.x]]?.owner ?? null : null;
-}
+/** Whether a co-op has a stand guarding a parish (its home parish always counts). */
+export function parishBuilt(s: State, p: Parish, owner: string): boolean { return p.stand === owner; }
+/** The parish each landmark is in: whoever feeds it collects the fees. */
+export const LANDMARK_PARISH: Record<Landmark, number> = { port: P.MICHAEL, airport: P.CHRIST };
+/** Who collects fees at a landmark: whoever feeds its parish (a player id, AgroCorp, or nobody). */
+export function landmarkHolder(s: State, type: Landmark): string | null { return s.parishes[LANDMARK_PARISH[type]].owner; }
 export const airportOpen = (s: State) => s.weather.stormT <= 0 && s.time < s.weather.nextHurr - 60;
 /** The BBD you'd actually get or pay for a deal once the fee is taken, and the fee itself (0 if you hold the parish). */
 export function dealTerms(s: State, pid: string, at: Landmark, id: DealId) {
@@ -266,12 +192,20 @@ export function dealTerms(s: State, pid: string, at: Landmark, id: DealId) {
   const bbd = d.get.bbd ?? d.give.bbd ?? 0, fee = holder && holder !== pid ? Math.round(bbd * FEE) : 0;
   return { deal: d, fee, holder, net: d.get.bbd ? bbd - fee : bbd + fee };
 }
+/** Which town slot a world tile is in, and whether it's this player's. */
+export const townOf = (s: State, i: number) => s.map.town[i];
+export const inTownOf = (s: State, pid: string, i: number) => { const p = player(s, pid); return !!p && s.map.town[i] === p.slot; };
+/** How much slower flying fish are to catch, from AgroCorp's factory farm runoff. */
+export function fishFactor(s: State): number {
+  const n = Object.values(s.buildings).filter((b) => b.type === 'ffarm' && b.done).length;
+  return Math.max(FISH_FLOOR, 1 - RUNOFF_FISH * n);
+}
 
 /** What's left to gather on a player's land: count and amount per resource type. */
 export function resourcesOnLand(s: State, owner: string): Record<NodeType, { count: number; left: number }> {
   const out = { tree: { count: 0, left: 0 }, fish: { count: 0, left: 0 }, rock: { count: 0, left: 0 }, spring: { count: 0, left: 0 } };
   for (const n of s.nodes) {
-    if (n.amt <= 0 || n.pid < 0 || s.parishes[n.pid].owner !== owner) continue;
+    if (n.amt <= 0 || n.town !== player(s, owner)?.slot) continue;
     out[n.type].count++; if (n.max !== Infinity) out[n.type].left += n.amt;
   }
   return out;
@@ -288,7 +222,7 @@ export function claimBlock(s: State, pid: string, p: Parish): string | null {
   if (p.id === AGRO_HOME) return "AgroCorp's headquarters can't be won over.";
   const other = p.owner && p.owner !== AGRO ? player(s, p.owner) : undefined;
   if (other && other.team === me.team) return `${other.name} already feeds this parish.`;
-  if (other && parishBuilt(s, p, other.id)) return `${other.name} has buildings here, so it can't be won over yet.`;
+  if (other && parishBuilt(s, p, other.id)) return `${other.name} has a co-op stand here, so it can't be won over.`;
   if (!p.adj.some((a) => s.parishes[a].owner === pid)) return 'Not next to your parishes yet. Feed the parishes in between first.';
   return null;
 }
@@ -296,17 +230,18 @@ export function placeBlock(s: State, pid: string, type: BType, x: number, y: num
   const d = BT[type], me = player(s, pid);
   if (!me) return 'Unknown player.';
   if ((d.age ?? 1) > me.age) return `${d.name} unlocks in the ${AGES[(d.age ?? 1) - 1].name}.`;
+  let shore = false;
   for (let dy = 0; dy < d.h; dy++) for (let dx = 0; dx < d.w; dx++) {
     const tx = x + dx, ty = y + dy;
-    if (!inB(tx, ty)) return 'That is out at sea.';
+    if (!inB(tx, ty)) return 'That is off the map.';
     const i = ty * W + tx;
-    if (!s.map.land[i]) return 'You can only build on land.';
-    const p = s.parishes[s.map.pid[i]];
-    if (p.owner !== pid) return `${p.name} isn't yours yet. Build inside your own parishes.`;
-    if (s.nodeAt[i] >= 0 || s.bAt[i] >= 0) return 'That tile is taken.';
-    if (s.roads[i]) return "That's a road. Build beside it.";
-    if (d.coast && !s.map.coast[i]) return 'Seawalls go on coast tiles.';
+    if (s.map.town[i] !== me.slot) return 'Build inside your own town.';
+    if (!s.map.land[i]) return s.map.kind[i] === 4 ? "That's the hedge at the edge of town." : 'You can only build on land.';
+    if (s.nodeAt[i] >= 0 || s.bAt[i] >= 0) return 'That spot is taken.';
+    if (s.roads[i]) return "That's a road or path. Build beside it.";
+    if (s.map.coast[i]) shore = true;
   }
+  if (d.coast && !shore) return `${d.name}s go on the shore, where the sand meets the sea.`;
   return null;
 }
 
@@ -335,7 +270,7 @@ function follow(s: State, w: Worker, dt: number): 'arrived' | 'moving' | 'blocke
   if (!w.path.length) return 'arrived';
   const n = w.path[0];
   if (!passable(s, n)) { w.path = findPath(s, tileOf(w), w.goal); return w.path ? 'moving' : 'blocked'; }
-  const tx = ix(n) + 0.5, ty = iy(n) + 0.5, dx = tx - w.x, dy = ty - w.y, d = dist(dx, dy), st = SPEED * dt * (s.roads[tileOf(w)] && s.roads[n] ? 2 : 1);
+  const tx = ix(n) + 0.5, ty = iy(n) + 0.5, dx = tx - w.x, dy = ty - w.y, d = dist(dx, dy), st = SPEED * dt * (s.roads[tileOf(w)] && s.roads[n] ? 1.7 : 1);
   if (Math.abs(dx) > 0.01) w.face = Math.sign(dx);
   if (d <= st) { w.x = tx; w.y = ty; w.path.shift(); } else { w.x += (dx / d) * st; w.y += (dy / d) * st; }
   return w.path.length ? 'moving' : 'arrived';
@@ -354,7 +289,8 @@ function assignFarm(s: State, w: Worker, b: Building) {
 }
 function nearestNode(s: State, type: NodeType, x: number, y: number, r: number): Node | null {
   let best: Node | null = null, bd = r * r;
-  for (const n of s.nodes) { if (n.type !== type || n.amt <= 0) continue; const d = (n.x + 0.5 - x) ** 2 + (n.y + 0.5 - y) ** 2; if (d < bd) { bd = d; best = n; } }
+  const town = s.map.town[Math.floor(y) * W + Math.floor(x)];
+  for (const n of s.nodes) { if (n.type !== type || n.amt <= 0 || n.town !== town) continue; const d = (n.x + 0.5 - x) ** 2 + (n.y + 0.5 - y) ** 2; if (d < bd) { bd = d; best = n; } }
   return best;
 }
 function nearestDrop(s: State, owner: string, x: number, y: number): Building | null {
@@ -379,7 +315,7 @@ function updWorker(s: State, w: Worker, dt: number) {
       const r = follow(s, w, dt); if (r === 'arrived') w.phase = 'work'; else if (r === 'blocked') setIdle(s, w); return;
     }
     w.working = true; b.progress += dt / BT[b.type].build;
-    if (b.progress >= 1) { b.done = true; b.progress = 1; b.hp = b.maxHp; emit(s, 'info', `${BT[b.type].name} built.`, b.owner); }
+    if (b.progress >= 1) { b.done = true; b.progress = 1; b.hp = b.maxHp; emit(s, 'info', `${bName(b)} built.`, b.owner); }
     return;
   }
   let type: Res, rate: number, goal: Goal;
@@ -391,17 +327,17 @@ function updWorker(s: State, w: Worker, dt: number) {
       else if (w.amt > 0) { w.phase = 'drop'; w.path = null; }
       else { setIdle(s, w); return; }
     }
-    type = NT[n.type].res; rate = NT[n.type].rate * (n.type === 'spring' && drought(s) ? 0.5 : 1); goal = rectOf(n);
+    type = NT[n.type].res; rate = NT[n.type].rate * (n.type === 'spring' && drought(s) ? 0.5 : 1) * (n.type === 'fish' ? fishFactor(s) : 1); goal = rectOf(n);
   } else {
     const b = s.buildings[t.b]; if (!b || !b.done) { setIdle(s, w); return; }
-    type = 'food'; rate = 0.85 * (b.pest > 0 ? 0.35 : 1) * (composted(s, b) ? COMPOST_BONUS : 1) * (runoff(s, b) ? RUNOFF : 1); goal = rectOf(b);
+    type = 'food'; rate = 0.85 * (b.pest > 0 ? 0.35 : 1) * (composted(s, b) ? COMPOST_BONUS : 1); goal = rectOf(b);
   }
   if (w.phase === 'to') {
     if (!w.path && !goTo(s, w, goal)) {
       // boxed in by other trees or rocks: try the nearest reachable resource of the same kind
       if (t.k === 'gather') {
         const type0 = s.nodes[t.n].type;
-        const alts = s.nodes.filter((n) => n.type === type0 && n.amt > 0 && n.id !== t.n)
+        const alts = s.nodes.filter((n) => n.type === type0 && n.amt > 0 && n.id !== t.n && n.town === s.nodes[t.n].town)
           .sort((a, z) => dist(a.x - w.x, a.y - w.y) - dist(z.x - w.x, z.y - w.y)).slice(0, 6);
         const alt = alts.find((n) => goTo(s, w, rectOf(n)));
         if (alt) { t.n = alt.id; return; }
@@ -455,7 +391,7 @@ export function step(s: State): void {
     }
     const hub = Object.values(s.buildings).some((b) => b.owner === p.id && b.type === 'hub' && b.done);
     const dues = DUES * owned(s, p.id) * (hub ? HUB_DUES : 1) * dt; p.res.bbd += dues; p.flow.gain.bbd += dues;
-    if (p.boats && s.weather.stormT <= 0) { const f = p.boats * BOAT_RATE * dt; p.res.food += f; p.flow.gain.food += f; p.stats.food += f; }
+
     if (landmarkHolder(s, 'airport') === p.id && airportOpen(s)) { const t = TOURISM * dt; p.res.bbd += t; p.flow.gain.bbd += t; }
     // everyone eats; an empty stockpile means hungry workers at half speed
     const need = EAT * workersOf(s, p.id).length * dt, ate = Math.min(need, Math.max(0, p.res.food));
@@ -469,6 +405,8 @@ export function step(s: State): void {
     if (!b.done) continue;
     const me = player(s, b.owner); if (!me) continue;
     if (b.type === 'cistern' && !drought(s)) { me.res.water += 0.5 * dt; me.flow.gain.water += 0.5 * dt; }
+    if (b.type === 'dock' && s.weather.stormT <= 0) { const f = BOAT_RATE * fishFactor(s) * dt; me.res.food += f; me.flow.gain.food += f; me.stats.food += f; }
+    const inc = BT[b.type].income; if (inc) { me.res.bbd += inc * dt; me.flow.gain.bbd += inc * dt; }
     if (b.type === 'house') { const g = HOUSES[b.lvl - 1].garden * dt; if (g) { me.res.food += g; me.stats.food += g; me.flow.gain.food += g; } }
     if (b.type === 'aqua') {
       const f = aquaPowered(s, b) ? 1 : 0.5, use = 0.5 * f * dt;
@@ -511,6 +449,7 @@ function landfall(s: State) {
       else if (rand(s) < 0.6) { b.hp -= b.maxHp * (0.4 + rand(s) * 0.4); if (b.hp <= 0) { removeBuilding(s, b); agroLost++; } }
       continue;
     }
+    if (BT[b.type].deco && b.type !== 'fountain' && b.type !== 'bandstand' && !protectedB(s, b) && rand(s) < 0.25) { removeBuilding(s, b); continue; }
     // coral stone and newer houses stand up to a hurricane; a chattel house takes half the damage
     const wind = b.type === 'house' ? HOUSES[b.lvl - 1].wind : 0;
     const prot = protectedB(s, b) || wind === 2;
@@ -526,20 +465,14 @@ function landfall(s: State) {
   for (const n of s.nodes) if (n.type === 'tree' && n.amt > 0 && rand(s) < 0.3) n.amt *= 0.5;
   s.agro.bbd *= 0.7;
   if (agroLost) { const hq = Object.values(s.buildings).find((b) => b.type === 'hq'); news(s, AGRO, `${name} flattened ${agroLost === 1 ? 'one of AgroCorp\'s buildings' : `${agroLost} of AgroCorp's buildings`}.`, hq ? { x: hq.x + 1, y: hq.y + 1 } : { x: 0, y: 0 }, 'good'); }
-  for (const p of s.players) {
-    let lostBoats = 0; for (let k = 0; k < p.boats; k++) if (rand(s) < 0.3) lostBoats++;
-    p.boats -= lostBoats;
-    if (lostBoats) emit(s, 'bad', `The storm sank ${lostBoats} of your fishing boats.`, p.id);
-    if (linked(s, p.id, 'port')) { earn(p, 'food', RELIEF); emit(s, 'good', `A relief ship reached Bridgetown Port: +${RELIEF} food for your co-op.`, p.id); }
-  }
+  for (const p of s.players)
+    if (Object.values(s.buildings).some((b) => b.owner === p.id && b.type === 'dock' && b.done)) { earn(p, 'food', RELIEF); emit(s, 'good', `A relief boat tied up at your dock: +${RELIEF} food.`, p.id); }
   emit(s, 'bad', `Hurricane ${name} made landfall. AgroCorp lost 30% of its cash too.`);
   for (const p of s.players) emit(s, 'bad', `Your losses: ${lost[p.id] ?? 0} buildings lost, ${dmg[p.id] ?? 0} damaged.`, p.id);
 }
 
 function setOwner(s: State, p: Parish, o: string | null) {
-  const prev = p.owner;
-  if (prev && prev !== o)
-    for (const b of Object.values(s.buildings)) if (b.owner === prev && !b.done && s.map.pid[b.y * W + b.x] === p.id) removeBuilding(s, b);
+  if (p.owner !== o) p.stand = null;
   p.owner = o; s.parishVersion++;
 }
 
@@ -548,7 +481,7 @@ export function rivalOptions(s: State): { list: Parish[]; mult: number } {
   const nearR = (p: Parish) => p.adj.some((a) => s.parishes[a].owner === AGRO);
   const free = s.parishes.filter((p) => p.owner === null && nearR(p));
   if (free.length) return { list: free, mult: 1 };
-  const weak = s.parishes.filter((p) => { const o = p.owner && p.owner !== AGRO ? player(s, p.owner) : undefined; return !!o && p.id !== o.home && nearR(p) && !parishBuilt(s, p, o.id); });
+  const weak = s.parishes.filter((p) => { const o = p.owner && p.owner !== AGRO ? player(s, p.owner) : undefined; return !!o && p.id !== o.home && nearR(p) && p.stand !== o.id; });
   return { list: weak, mult: 1.5 };
 }
 export function rivalPrice(s: State): number {
@@ -576,16 +509,16 @@ function rival(s: State, dt: number) {
   const p = s.parishes[ag.target], price = rivalCost(s) * mult;
   if (!ag.warned && ag.bbd >= price * d.warnAt) {
     ag.warned = true;
-    emit(s, 'warn', p.owner ? `AgroCorp is about to buy out ${p.name}. Put a building there to keep it.` : `AgroCorp is about to buy up ${p.name}. Feed it first to keep it out of their hands.`);
+    emit(s, 'warn', p.owner ? `AgroCorp is about to buy out ${p.name}. Put a co-op stand there to keep it.` : `AgroCorp is about to buy up ${p.name}. Feed it first to keep it out of their hands.`);
   }
   if (ag.bbd < price) return;
   const was = p.owner;
   ag.bbd -= price; ag.target = null; ag.warned = false; setOwner(s, p, AGRO);
-  if (was) emit(s, 'bad', `AgroCorp bought out ${p.name}. It had no buildings to hold it.`, was);
+  if (was) emit(s, 'bad', `AgroCorp bought out ${p.name}. It had no co-op stand to hold it.`, was);
   emit(s, 'bad', `AgroCorp bought up ${p.name}.`);
 }
 
-/** AgroCorp puts up a factory farm, a cane mill or company apartments on land it owns, one at a time. */
+/** AgroCorp puts up factory farms, cane mills and company towers on its estate, one at a time, one per parish it owns. */
 function agroBuild(s: State, dt: number) {
   const mine = Object.values(s.buildings).filter((b) => b.owner === AGRO && b.type !== 'hq');
   // construction: no workers to pay, it just goes up
@@ -594,58 +527,78 @@ function agroBuild(s: State, dt: number) {
     b.progress = Math.min(1, b.progress + dt / BT[b.type].build);
     if (b.progress >= 1) {
       b.done = true; b.hp = b.maxHp;
-      const p = s.parishes[s.map.pid[b.y * W + b.x]];
-      news(s, AGRO, b.type === 'ffarm' ? `AgroCorp's Factory Farm in ${p.name} is running. Farm plots near it grow less.` : `AgroCorp opened ${b.type === 'tower' ? 'Agro Towers' : 'a Cane Mill'} in ${p.name}. Its income is growing.`, { x: b.x + 1, y: b.y + 1 }, 'bad');
+      news(s, AGRO, b.type === 'ffarm' ? "AgroCorp's new Factory Farm is running. Its runoff makes flying fish scarcer in every town." : `AgroCorp opened ${b.type === 'tower' ? 'Agro Towers' : 'a Cane Mill'} on its estate. Its income is growing.`, { x: b.x + 1.5, y: b.y + 1.5 }, 'bad');
     }
   }
-  if (s.time < s.agro.nextBuild || mine.some((b) => !b.done)) return;
+  if (s.time < s.agro.nextBuild || mine.some((b) => !b.done) || mine.length >= owned(s, AGRO) + 1) return;
   s.agro.nextBuild = s.time + AGRO_BUILD_EVERY;
-  // the parish with room, home parish allowed two; fewest AgroCorp buildings first
-  const count = (pid: number) => mine.filter((b) => s.map.pid[b.y * W + b.x] === pid).length;
-  const lands = s.parishes.filter((p) => p.owner === AGRO && count(p.id) < (p.id === AGRO_HOME ? 2 : 1)).sort((a, b) => count(a.id) - count(b.id) || a.id - b.id);
-  for (const p of lands) {
-    const at = agroSpot(s, p.id); if (!at) continue;
-    // whichever kind it has fewest of, in order: factory farm, cane mill, towers
-    const type = AGRO_BUILDS.reduce((best, t) => (mine.filter((b) => b.type === t).length < mine.filter((b) => b.type === best).length ? t : best));
-    const b = addBuilding(s, type, at[0], at[1], AGRO, false);
-    news(s, AGRO, `AgroCorp is building ${type === "tower" ? "" : "a "}${BT[type].name} in ${p.name}.`, { x: b.x + 1, y: b.y + 1 }, 'warn');
-    return;
-  }
+  const at = agroSpot(s); if (!at) return;
+  // whichever kind it has fewest of, in order: factory farm, cane mill, towers
+  const type = AGRO_BUILDS.reduce((best, t) => (mine.filter((b) => b.type === t).length < mine.filter((b) => b.type === best).length ? t : best));
+  const b = addBuilding(s, type, at[0], at[1], AGRO, false);
+  news(s, AGRO, `AgroCorp is building ${type === 'tower' ? '' : 'a '}${BT[type].name} on its estate.`, { x: b.x + 1.5, y: b.y + 1.5 }, 'warn');
 }
-/** A free 2x2 spot in a parish, off roads, coast, towns and resources, nearest its middle; null if there's none. */
-function agroSpot(s: State, pidx: number): [number, number] | null {
-  const p = s.parishes[pidx], m = s.map;
-  const d = (i: number) => (ix(i) - p.lx) ** 2 + (iy(i) - (p.ly + 2.5)) ** 2; // just below the parish name
-  for (const i of p.tiles.slice().sort((a, b) => d(a) - d(b))) {
-    const x = ix(i), y = iy(i); let good = true;
-    for (let dy = -1; dy < 3 && good; dy++) for (let dx = -1; dx < 3; dx++) {
-      if (!inB(x + dx, y + dy)) { good = false; break; }
-      const j = (y + dy) * W + x + dx, inner = dx >= 0 && dx < 2 && dy >= 0 && dy < 2;
-      // the 2x2 itself must be clear land; the ring around it just free of buildings, so it isn't boxed in
-      if (s.bAt[j] >= 0 || (inner && (!m.land[j] || m.coast[j] || m.urban[j] || s.roads[j] || m.pid[j] !== p.id || s.nodeAt[j] >= 0))) { good = false; break; }
+/** A free 3x3 spot on AgroCorp's estate with a clear ring round it, nearest its HQ; null if there's none. */
+function agroSpot(s: State): [number, number] | null {
+  const o = townOrigin(AGRO_SLOT), hq = Object.values(s.buildings).find((b) => b.type === 'hq');
+  const cx = hq ? hq.x + 1 : o.x + 16, cy = hq ? hq.y + 1 : o.y + 16;
+  const cands: [number, number, number][] = [];
+  for (let y = o.y + 1; y < o.y + TOWN - 4; y++) for (let x = o.x + 1; x < o.x + TOWN - 4; x++) cands.push([x, y, dist(x + 1 - cx, y + 1 - cy)]);
+  cands.sort((a, b) => a[2] - b[2]);
+  for (const [x, y] of cands) {
+    let good = true;
+    for (let dy = -1; dy < 4 && good; dy++) for (let dx = -1; dx < 4; dx++) {
+      const j = (y + dy) * W + x + dx, inner = dx >= 0 && dx < 3 && dy >= 0 && dy < 3;
+      if (s.bAt[j] >= 0 || (inner && (!s.map.land[j] || s.map.coast[j] || s.roads[j] || s.nodeAt[j] >= 0))) { good = false; break; }
     }
     if (good) return [x, y];
   }
   return null;
 }
-/** Whether a factory farm's runoff reaches this farm plot. */
-export function runoff(s: State, b: Building): boolean {
-  for (const f of Object.values(s.buildings)) if (f.type === 'ffarm' && f.done && dist(f.x + 1 - (b.x + 0.5), f.y + 1 - (b.y + 0.5)) <= RUNOFF_R) return true;
-  return false;
-}
 
-export function winTarget(s: State) { return s.mode === 'versus' && s.players.length > 2 ? 4 : WIN_N; }
+/** AgroCorp wins if it buys this many parishes. */
+export function winTarget(_s: State) { return WIN_N; }
+
+/**
+ * A town's score, and what it's made of. people: room in its homes. food: food grown and caught. bbd: money earned.
+ * beauty: decorations, nice buildings, better houses, paths and trees left standing. safe: buildings that stand up to
+ * a hurricane. age: ages reached. parish: parishes fed.
+ */
+export function townScore(s: State, pid: string) {
+  const p = player(s, pid)!;
+  const bs = Object.values(s.buildings).filter((b) => b.owner === pid && b.done);
+  let beauty = 0, safe = 0;
+  for (const b of bs) {
+    beauty += BT[b.type].beauty ?? 0;
+    if (b.type === 'house') beauty += b.lvl - 1;
+    if (BT[b.type].deco || b.type === 'tc') continue;
+    if (protectedB(s, b) || (b.type === 'house' && HOUSES[b.lvl - 1].wind === 2)) safe++;
+  }
+  let paths = 0; const mark = 2 + s.players.indexOf(p);
+  for (let i = 0; i < s.roads.length; i++) if (s.roads[i] === mark) paths++;
+  const trees = s.nodes.filter((n) => n.type === 'tree' && n.amt > 0 && n.town === p.slot).length;
+  beauty += Math.floor(paths / 4) + Math.floor(trees / 2);
+  const parts = {
+    people: popCap(s, pid) * SCORE.people,
+    food: Math.floor(p.stats.food / SCORE_FOOD_PER) * SCORE.food,
+    bbd: Math.floor(p.flow.gain.bbd / SCORE_BBD_PER) * SCORE.bbd,
+    beauty: beauty * SCORE.beauty,
+    safe: safe * SCORE.safe,
+    age: (p.age - 1) * SCORE.age,
+    parish: owned(s, pid) * SCORE.parish,
+  };
+  return { ...parts, total: Object.values(parts).reduce((a, v) => a + v, 0) };
+}
 
 function checkEnd(s: State) {
   if (s.ended) return;
-  if (s.mode === 'coop') {
-    if (teamOwned(s, 0) >= WIN_N && s.players.some((p) => p.age >= MAX_AGE)) { s.ended = { winners: s.players.map((p) => p.id), reason: 'food-secure' }; return; }
-  } else {
-    const t = winTarget(s);
-    const w = s.players.find((p) => owned(s, p.id) >= t && p.age >= MAX_AGE);
-    if (w) { s.ended = { winners: [w.id], reason: 'food-secure' }; return; }
-  }
-  if (owned(s, AGRO) >= WIN_N) s.ended = { winners: [AGRO], reason: 'bought-out' };
+  if (owned(s, AGRO) >= WIN_N) { s.ended = { winners: [AGRO], reason: 'bought-out' }; return; }
+  if (s.time < s.endsAt) return;
+  // time: the best town wins; in co-op everyone who held AgroCorp off wins together
+  if (s.mode === 'coop') { s.ended = { winners: s.players.map((p) => p.id), reason: 'time' }; return; }
+  const scores = s.players.map((p) => ({ id: p.id, t: townScore(s, p.id).total }));
+  const best = Math.max(...scores.map((x) => x.t));
+  s.ended = { winners: scores.filter((x) => x.t === best).map((x) => x.id), reason: 'time' };
 }
 
 // ---------- commands
@@ -664,7 +617,7 @@ export type Command =
   | { type: 'claim'; parish: number }
   | { type: 'road'; tiles: number[] }
   | { type: 'trade'; at: Landmark; deal: DealId }
-  | { type: 'boat' }
+  | { type: 'stand'; parish: number }
   | { type: 'offer'; to: string; give: Partial<Record<Res, number>>; get: Partial<Record<Res, number>> }
   | { type: 'answer'; offer: number; accept: boolean }
   | { type: 'gift'; to: string; give: Partial<Record<Res, number>> };
@@ -712,6 +665,7 @@ export function applyCommand(s: State, pid: string, c: Command): CmdResult {
     case 'place': {
       const d = BT[c.building]; if (!d || ['tc', 'hq', 'port', 'airport', 'ffarm', 'mill', 'tower'].includes(c.building)) return fail('Unknown building.');
       const r = placeBlock(s, pid, c.building, c.x, c.y); if (r) return fail(r);
+      if (c.building === 'dock' && Object.values(s.buildings).filter((b) => b.owner === pid && b.type === 'dock').length >= MAX_DOCKS) return fail(`Your bay has room for ${MAX_DOCKS} docks.`);
       const cost = buildCost(s, pid, c.building), nm = bName({ type: c.building, lvl: houseLevelFor(s, pid) });
       if (!canAfford(me.res, cost)) return fail(`Not enough for a ${nm}: needs ${fmtCost(cost)}.`);
       spend(me, cost);
@@ -773,19 +727,18 @@ export function applyCommand(s: State, pid: string, c: Command): CmdResult {
       let laid = 0, why = '';
       for (const i of [...new Set(c.tiles)].slice(0, 80)) {
         if (!Number.isInteger(i) || i < 0 || i >= W * H) continue;
-        if (!s.map.land[i]) { why ||= 'Roads go on land.'; continue; }
-        if (s.parishes[s.map.pid[i]].owner !== pid) { why ||= 'You can only lay roads in your own parishes.'; continue; }
+        if (s.map.town[i] !== me.slot) { why ||= 'Lay paths in your own town.'; continue; }
+        if (!s.map.land[i]) { why ||= 'Paths go on land.'; continue; }
         if (s.roads[i]) continue;
         if (s.nodeAt[i] >= 0 || s.bAt[i] >= 0) { why ||= 'Something is in the way.'; continue; }
-        if (me.res.stone < ROAD_COST) { why = `Out of stone: each road tile costs ${ROAD_COST}.`; break; }
-        spend(me, { stone: ROAD_COST }); s.roads[i] = 2 + s.players.indexOf(me); laid++;
+        if (me.res.stone < PATH_COST) { why = `Out of stone: each path tile costs ${PATH_COST}.`; break; }
+        spend(me, { stone: PATH_COST }); s.roads[i] = 2 + s.players.indexOf(me); laid++;
       }
       if (laid) s.roadVersion++;
       return laid ? { ok: true, msg: why || undefined } : fail(why || 'Nothing to build there.');
     }
     case 'trade': {
       const d = DEALS[c.at]?.[c.deal]; if (!d) return fail('Unknown deal.');
-      if (!linked(s, pid, c.at)) return fail(`Connect your Town Centre, a Depot or a Market to ${BT[c.at].name} by road first.`);
       if (c.at === 'airport' && !airportOpen(s)) return fail('The airport is closed for the hurricane.');
       const t = dealTerms(s, pid, c.at, c.deal);
       const give = { ...d.give }, get = { ...d.get };
@@ -798,11 +751,13 @@ export function applyCommand(s: State, pid: string, c: Command): CmdResult {
       }
       return { ok: true };
     }
-    case 'boat': {
-      if (!linked(s, pid, 'port')) return fail('Connect to Bridgetown Port by road first.');
-      if (me.boats >= MAX_BOATS) return fail(`You already have ${MAX_BOATS} boats, the most the harbour can berth for you.`);
-      if (!canAfford(me.res, BOAT_COST)) return fail(`A fishing boat needs ${fmtCost(BOAT_COST)}.`);
-      spend(me, BOAT_COST); me.boats++; emit(s, 'good', `Fishing boat launched. Each boat lands ${Math.round(BOAT_RATE * 60)} flying fish a minute.`, pid);
+    case 'stand': {
+      const p = s.parishes[c.parish]; if (!p) return fail('Unknown parish.');
+      if (p.owner !== pid) return fail(`Feed ${p.name} first, then put a stand there.`);
+      if (p.stand === pid) return fail(`You already have a stand in ${p.name}.`);
+      if (!canAfford(me.res, STAND_COST)) return fail(`A co-op stand needs ${fmtCost(STAND_COST)}.`);
+      spend(me, STAND_COST); p.stand = pid; s.parishVersion++;
+      emit(s, 'good', `Your co-op stand opened in ${p.name}. AgroCorp can't buy it now.`, pid);
       return { ok: true };
     }
     case 'offer': {
@@ -843,8 +798,8 @@ export function applyCommand(s: State, pid: string, c: Command): CmdResult {
       const r = claimBlock(s, pid, p); if (r) return fail(r);
       const cost = claimCost(s, pid, p); if (!canAfford(me.res, cost)) return fail(`Feeding ${p.name} needs ${fmtCost(cost)}.`);
       const was = p.owner; spend(me, cost); setOwner(s, p, pid);
-      emit(s, 'good', `${p.name} is fed by your co-op now. Put a building there so it can't be bought out.`, pid);
-      if (s.players.length > 1) news(s, pid, `${me.name} now feeds ${p.name}.`, { x: p.lx, y: p.ly }, 'info');
+      emit(s, 'good', `${p.name} is fed by your co-op now. Put a co-op stand there so it can't be bought out.`, pid);
+      if (s.players.length > 1) { const tc = tcOf(s, pid); news(s, pid, `${me.name} now feeds ${p.name}.`, tc ? { x: tc.x + 1.5, y: tc.y + 1.5 } : { x: 0, y: 0 }, 'info'); }
       if (was && was !== AGRO) emit(s, 'bad', `${me.name} won ${p.name} from you.`, was);
       checkEnd(s); return { ok: true };
     }
@@ -859,7 +814,7 @@ export function stateHash(s: State): string {
   for (const p of s.players) { mix(p.res.food); mix(p.res.water); mix(p.res.stone); mix(p.res.bbd); mix(p.age); }
   for (const w of Object.values(s.workers)) { mix(w.id); mix(w.x); mix(w.y); mix(w.amt); }
   for (const b of Object.values(s.buildings)) { mix(b.id); mix(b.hp); mix(b.progress); mix(b.lvl); }
-  for (const p of s.parishes) mix(p.owner ? p.owner.charCodeAt(p.owner.length - 1) : 0);
+  for (const p of s.parishes) { mix(p.owner ? p.owner.charCodeAt(p.owner.length - 1) : 0); mix(p.stand ? p.stand.charCodeAt(p.stand.length - 1) : 0); }
   for (const n of s.nodes) mix(n.amt === Infinity ? -1 : n.amt);
   mix(s.offers.length);
   return (h >>> 0).toString(16);
@@ -867,25 +822,23 @@ export function stateHash(s: State): string {
 
 // ---------- snapshots (for joining, rejoining and resyncing online games)
 
-export interface Snapshot { v: 1; state: Omit<State, 'map' | 'parishes' | 'nodeAt' | 'bAt' | 'roads'> & { owners: (string | null)[]; nodeAt: number[]; bAt: number[]; roads: number[] } }
+export interface Snapshot { v: 2; state: Omit<State, 'map' | 'island' | 'parishes' | 'nodeAt' | 'bAt' | 'roads'> & { owners: (string | null)[]; stands: (string | null)[]; nodeAt: number[]; bAt: number[]; roads: number[] } }
 
 /** A JSON-safe copy of everything that changes during a game. The map itself is rebuilt from the same data on every machine. */
 export function snapshot(s: State): Snapshot {
-  const { map: _m, parishes, nodeAt, bAt, roads, ...rest } = s;
-  void _m;
-  return { v: 1, state: JSON.parse(JSON.stringify({ ...rest, owners: parishes.map((p) => p.owner), nodeAt: Array.from(nodeAt), bAt: Array.from(bAt), roads: Array.from(roads) })) };
+  const { map: _m, island: _i, parishes, nodeAt, bAt, roads, ...rest } = s;
+  void _m; void _i;
+  return { v: 2, state: JSON.parse(JSON.stringify({ ...rest, owners: parishes.map((p) => p.owner), stands: parishes.map((p) => p.stand), nodeAt: Array.from(nodeAt), bAt: Array.from(bAt), roads: Array.from(roads) })) };
 }
 export function restore(snap: Snapshot): State {
-  const { map, parishes } = staticMap();
-  const { owners, nodeAt, bAt, roads, ...rest } = snap.state;
+  const { map, island, parishes } = staticMap();
+  if (snap.v !== 2) throw new Error('Saved game from an older version.');
+  const { owners, stands, nodeAt, bAt, roads, ...rest } = snap.state;
   // JSON turns Infinity (a spring's endless water) into null
   for (const n of rest.nodes) { if (n.max === null) n.max = Infinity; if (n.amt === null) n.amt = Infinity; }
-  // saves from before house levels
-  for (const b of Object.values(rest.buildings)) b.lvl ??= 1;
-  rest.agro.nextBuild ??= 0;
   return {
-    ...(rest as Omit<State, 'map' | 'parishes' | 'nodeAt' | 'bAt' | 'roads'>),
-    map, parishes: parishes.map((p, k) => ({ ...p, owner: owners[k] ?? null })),
+    ...(rest as Omit<State, 'map' | 'island' | 'parishes' | 'nodeAt' | 'bAt' | 'roads'>),
+    map, island, parishes: parishes.map((p, k) => ({ ...p, owner: owners[k] ?? null, stand: stands?.[k] ?? null })),
     nodeAt: Int32Array.from(nodeAt), bAt: Int32Array.from(bAt), roads: Uint8Array.from(roads),
   };
 }
