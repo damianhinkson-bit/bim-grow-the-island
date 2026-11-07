@@ -1,4 +1,4 @@
-import { AGES, BT, COMPOST_R, HOUSES, SEA_R, WINDBREAK_R, fmtCost, type BType, type Cost } from '@bim/sim';
+import { AGES, BT, COMPOST_R, HOUSES, SCORE, SEA_R, WINDBREAK_R, fmtCost, type BType, type Cost } from '@bim/sim';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const WIND = ['Blows down easily', 'Handles high winds (half the damage)', 'Hurricane-proof'];
@@ -15,6 +15,7 @@ export function infoCard(type: BType, lvl = 1, opts: { cost?: Cost; showNext?: b
     about = h.about;
     rows.push(['Holds', `${h.pop} people`]);
     rows.push(['Hurricanes', WIND[h.wind]]);
+    if (lvl > 1) rows.push(['Good looks', `+${lvl - 1} (★ ${(lvl - 1) * SCORE.beauty} on your town score)`]);
     if (h.garden) rows.push([lvl >= 4 ? 'Rooftop garden' : 'Kitchen garden', `+${Math.round(h.garden * 60)} food a minute`]);
   } else {
     const d = BT[type];
@@ -23,7 +24,11 @@ export function infoCard(type: BType, lvl = 1, opts: { cost?: Cost; showNext?: b
     if (type === 'seawall') rows.push(['Hurricanes', `Shields buildings within ${SEA_R} tiles`]);
     else if (type === 'windbreak') rows.push(['Hurricanes', `Shields buildings within ${WINDBREAK_R} tiles`]);
     else if (type === 'composter') rows.push(['Reach', `Farm plots within ${COMPOST_R} tiles`]);
-    else if (type !== 'tc') rows.push(['Hurricanes', 'Needs a seawall or windbreak nearby']);
+    else if (d.deco) rows.push(['Hurricanes', d.w * d.h > 1 ? 'Stands up to storms' : 'Can blow away without a windbreak']);
+    else if (type !== 'tc' && type !== 'hq') rows.push(['Hurricanes', 'Needs a seawall or windbreak nearby']);
+    if (d.beauty) rows.push(['Good looks', `+${d.beauty} (★ ${d.beauty * SCORE.beauty} on your town score)`]);
+    if (d.income) rows.push(['Earns', `+${Math.round(d.income * 60)} BBD a minute`]);
+    if (d.coast) rows.push(['Where', 'On your shore']);
     if (d.drop) rows.push(['Drop-off', 'Workers bring resources here']);
   }
   if (opts.cost) rows.push(['Costs', fmtCost(opts.cost) || 'Free']);

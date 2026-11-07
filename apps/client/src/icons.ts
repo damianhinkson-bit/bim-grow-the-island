@@ -28,6 +28,8 @@ export const ICON = {
   /** players */
   players: svg('<circle cx="7" cy="6.6" r="2.8" fill="#3FD0C9"/><path d="M2.2 16.6c0-3.2 2.1-5.4 4.8-5.4s4.8 2.2 4.8 5.4z" fill="#3FD0C9"/><circle cx="13.6" cy="7.6" r="2.5" fill="#FF7AC8"/><path d="M9.6 16.6c.3-2.9 1.9-4.6 4-4.6 2.4 0 4.2 1.9 4.2 4.6z" fill="#FF7AC8"/>'),
   /** a crosshair, for "show me on the map" */
+  star: svg('<path d="M10 1.8l2.5 5.3 5.7.7-4.2 4 1.1 5.7L10 14.7l-5.1 2.8 1.1-5.7-4.2-4 5.7-.7z" fill="#FFC726" stroke="#C9921A" stroke-width=".9" stroke-linejoin="round"/>'),
+  clock: svg('<circle cx="10" cy="10" r="7.6" fill="#F3F6FF"/><circle cx="10" cy="10" r="7.6" fill="none" stroke="#9FB0D6" stroke-width="1"/><path d="M10 5.2V10l3.2 2.2" fill="none" stroke="#24356B" stroke-width="1.7" stroke-linecap="round"/>'),
   locate: svg('<circle cx="10" cy="10" r="5.4" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="10" cy="10" r="1.6" fill="currentColor"/><path d="M10 1.8v3M10 15.2v3M1.8 10h3M15.2 10h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>'),
   /** a worker with a hoe */
   worker: svg('<circle cx="9" cy="5" r="2.8" fill="#F3F6FF"/><path d="M4.4 17.6c0-3.6 2-6.2 4.6-6.2s4.6 2.6 4.6 6.2z" fill="#F3F6FF"/><path d="M15.6 6.4v11.2M13.4 7l4.4-1.4" stroke="#C9A66B" stroke-width="1.5" stroke-linecap="round"/>'),

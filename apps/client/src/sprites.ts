@@ -1,6 +1,7 @@
 import { Texture } from 'pixi.js';
 import type { BType, NodeType } from '@bim/sim';
-import { T } from './terrain';
+/** Size of one tile in the old map art, used by the building pictures in the panels. */
+const T = 24;
 
 /** Sprite textures are drawn once with Canvas 2D at 3x, then reused by every sprite. */
 const RES = 3;

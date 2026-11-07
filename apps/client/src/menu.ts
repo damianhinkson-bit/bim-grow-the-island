@@ -1,4 +1,4 @@
-import { DIFFICULTY, MAX_PLAYERS, type Difficulty, type LobbyInfo, type Mode } from '@bim/sim';
+import { DEFAULT_MINUTES, DIFFICULTY, MATCH_MINUTES, MAX_PLAYERS, type Difficulty, type LobbyInfo, type Mode } from '@bim/sim';
 
 const $ = <E extends HTMLElement = HTMLElement>(s: string) => document.querySelector(s) as E;
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -10,10 +10,10 @@ const store = {
 export const ONLINE = import.meta.env.MODE !== 'single' && location.protocol !== 'file:';
 
 export interface MenuActions {
-  solo(d: Difficulty, bots: number): void;
+  solo(d: Difficulty, bots: number, minutes: number): void;
   create(name: string): void;
   join(name: string, code: string): void;
-  settings(m: { mode?: Mode; difficulty?: Difficulty }): void;
+  settings(m: { mode?: Mode; difficulty?: Difficulty; minutes?: number }): void;
   start(): void;
   leave(): void;
 }
@@ -24,11 +24,14 @@ const DIFF_OPTS: [string, string, string][] = [['easy', 'Easy', 'Slow, lots of w
 /** Just the names, for the compact difficulty row; the hint under it explains the one picked. */
 const DIFF_SMALL = DIFF_OPTS.map(([v, l]) => [v, l, ''] as [string, string, string]);
 
-const botsHint = (n: number) => n === 0 ? 'Just you against AgroCorp.' : `Race ${n === 1 ? 'one computer co-op' : `${n} computer co-ops`} to feed the island, with AgroCorp after everyone's land.`;
+const MIN_OPTS = MATCH_MINUTES.map((m) => [String(m), `${m} min`, ''] as [string, string, string]);
+const botsHint = (n: number) => n === 0 ? 'Build the best town you can before time runs out, and keep AgroCorp off the island.' : `Race ${n === 1 ? 'one computer co-op' : `${n} computer co-ops`} to build the best town, with AgroCorp after everyone's land.`;
 
 /** The start screen and the online lobby, drawn into the overlay card. */
 export class Menu {
   private difficulty: Difficulty = 'normal';
+  /** Match length in minutes; the best town when it runs out wins. */
+  private minutes = MATCH_MINUTES.includes(Number(store.get('bim:minutes'))) ? Number(store.get('bim:minutes')) : DEFAULT_MINUTES;
   /** Computer co-ops racing you in a solo game. */
   private bots = Math.max(0, Math.min(3, Number(store.get('bim:bots') ?? 1) || 0));
   /** Players seen in the current lobby and when they first appeared. */
@@ -76,6 +79,7 @@ export class Menu {
           <p class="hint" id="diff-hint">${esc(diffHint(this.difficulty))}</p>
           <div class="diffrow stack"><span class="kicker">Computer co-ops racing you</span>${seg('bots', ['0', '1', '2', '3'].map((v) => [v, v, ''] as [string, string, string]), String(this.bots))}</div>
           <p class="hint" id="bots-hint">${esc(botsHint(this.bots))}</p>
+          <div class="diffrow stack"><span class="kicker">Match length</span>${seg('minutes', MIN_OPTS, String(this.minutes))}</div>
           <button class="btn primary" id="go-solo">Start growing</button>
           <div class="hlinks"><button class="linkbtn" data-go="pick">Back</button></div>
         </div>
@@ -90,11 +94,11 @@ export class Menu {
           <div class="hlinks"><button class="linkbtn" data-go="pick">Back</button></div>
         </div>
         <div class="hstep how" data-step="how" hidden>
-          <p class="sub">Grow food for Barbados. Feed <strong>6 of the 11 parishes</strong> and grow through five ages to the <strong>Co-op Age</strong> before AgroCorp buys up the island.</p>
+          <p class="sub">Build the <strong>best town on the island</strong> before the clock runs out. Homes, food, money, good looks and hurricane-proof buildings all add to your town score. If AgroCorp buys <strong>6 of the 11 parishes</strong>, everyone loses.</p>
           <ul>
             <li><strong>Tap a worker</strong>, then tap breadfruit, coral stone, a spring or flying fish to gather.</li>
-            <li><strong>Build</strong> houses, farms, roads and seawalls; trade at the port and airport.</li>
-            <li><strong>Tap a parish</strong> next to yours to feed it and win it over.</li>
+            <li><strong>Build</strong> houses, farms, docks and seawalls, then decorate with flowers, palms and paths.</li>
+            <li><strong>Open the island</strong> to feed parishes, put up co-op stands, trade at the port and airport, and visit other towns.</li>
             <li><strong>Money (BBD)</strong> comes from co-op dues in every parish you feed, and from selling food.</li>
             <li>Drag to pan. Pinch or scroll to zoom.</li>
           </ul>
@@ -110,7 +114,8 @@ export class Menu {
     this.card().querySelectorAll<HTMLButtonElement>('[data-go]').forEach((b) => (b.onclick = () => go(b.dataset.go!)));
     this.bindSeg('#difficulty', (v) => { this.difficulty = v as Difficulty; $('#diff-hint').textContent = diffHint(v); });
     this.bindSeg('#bots', (v) => { this.bots = Number(v); store.set('bim:bots', v); $('#bots-hint').textContent = botsHint(this.bots); });
-    $('#go-solo').onclick = () => this.a.solo(this.difficulty, this.bots);
+    this.bindSeg('#minutes', (v) => { this.minutes = Number(v); store.set('bim:minutes', v); });
+    $('#go-solo').onclick = () => this.a.solo(this.difficulty, this.bots, this.minutes);
     $('#tips-again').onclick = () => { try { localStorage.removeItem('bim:coach-done'); } catch { /* blocked */ } $('#tips-again').textContent = 'Done. The tips will show in your next game.'; };
     if (ONLINE) {
       const nm = () => { const v = $<HTMLInputElement>('#nm').value.trim(); if (v) store.set('bim:name', v); return v || 'Player'; };
@@ -185,8 +190,9 @@ export class Menu {
       <ul class="seats">${seats}</ul>
       ${host ? `<div class="kicker">Mode</div>${seg('mode', [['coop', 'Co-op', 'Together vs AgroCorp'], ['versus', 'Versus', 'Race each other']], l.mode)}
         <div class="kicker">Difficulty</div>${seg('ldiff', DIFF_SMALL, l.difficulty).replace('class="seg"', 'class="seg small"')}
+        <div class="kicker">Match length</div>${seg('lmin', MIN_OPTS, String(l.minutes ?? DEFAULT_MINUTES)).replace('class="seg"', 'class="seg small"')}
         <button class="btn primary" id="m-start"${(l.mode === 'versus' && l.players.length < 2) || away.length ? ' disabled' : ''}>${away.length ? `Waiting for ${esc(away.join(' and '))} to come back…` : 'Start the game'}</button>`
-        : `<p class="sub"><strong>${modeName}</strong> · ${DIFFICULTY[l.difficulty].label}. Waiting for the host to start…</p>`}
+        : `<p class="sub"><strong>${modeName}</strong> · ${DIFFICULTY[l.difficulty].label} · ${l.minutes ?? DEFAULT_MINUTES} minutes. Waiting for the host to start…</p>`}
       <button class="btn ghost" id="m-leave">Leave</button>`;
     const inviteText = `Join my game of Bim: Grow the Island! Tap the link and press Join (code ${l.code}).`;
     if (canShare) $('#share').onclick = async () => {
@@ -200,6 +206,7 @@ export class Menu {
     if (host) {
       this.bindSeg('#mode', (v) => this.a.settings({ mode: v as Mode }));
       this.bindSeg('#ldiff', (v) => this.a.settings({ difficulty: v as Difficulty }));
+      this.bindSeg('#lmin', (v) => this.a.settings({ minutes: Number(v) }));
       $('#m-start').onclick = () => this.a.start();
     }
     $('#m-leave').onclick = () => { this.a.leave(); history.replaceState(null, '', location.pathname); this.home(); };

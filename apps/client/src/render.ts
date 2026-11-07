@@ -1,8 +1,15 @@
 import { Application, Container, Graphics, Sprite, Text, Texture } from 'pixi.js';
-import { AGRO, DIFFICULTY, DT, H, SEA_R, TOWNS, W, drought, findPath, passable, placeBlock, player, roadNetwork, roadOwner, type BType, type Goal, type State } from '@bim/sim';
+import {
+  AGRO, AGRO_HOME, AGRO_SLOT, BT, DT, IH, IW, LANDMARK_PARISH, SEA_R, TC_LOCAL, TOWN, TOWN_SLOTS, W, drought, placeBlock, player, roadOwner, toT, townOrigin,
+  type BType, type Landmark, type State,
+} from '@bim/sim';
 import type { GameSession } from './game';
-import { buildingTex, nodeTex, truckTex, workerTex, type TruckKind } from './sprites';
-import { T, bakeOwnership, bakeTerrain } from './terrain';
+import { PX, buildingTex, drawCane, drawGround, drawPath, nodeTex, workerTex } from './pixel';
+import { IT, bakeOwnership, bakeTerrain } from './terrain';
+
+/** World pixels per town tile (one art pixel per world pixel). */
+const TOWN_SEA = 0x1e7fb8, ISLAND_SEA = 0x0a3478;
+export const T = PX;
 
 export type Selection =
   | { kind: 'workers'; ids: Set<number> }
@@ -10,323 +17,360 @@ export type Selection =
   | { kind: 'node'; id: number }
   | { kind: 'parish'; id: number }
   | { kind: 'player'; id: string }
+  | { kind: 'landmark'; id: Landmark }
   | null;
 export interface View { sel: Selection; buildMode: BType | null; marks: { x: number; y: number; t: number }[]; roadMode: boolean; roadDraft: Set<number> }
+/** What's under a tap on the island view. */
+export type IslandHit = { kind: 'town'; pid: string } | { kind: 'estate' } | { kind: 'landmark'; type: Landmark } | { kind: 'parish'; id: number } | null;
 
 const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const LABEL_FONT = 'Figtree, system-ui, sans-serif';
+/** Where the port and airport are on the island. */
+const LANDMARK_AT: Record<Landmark, [number, number]> = { port: toT(13.104, -59.63), airport: toT(13.0752, -59.497) };
 
+/**
+ * Draws the game: a close-up view of one town (yours, or one you're visiting), or the island view with every town,
+ * the parishes, AgroCorp's land, the port and the airport. Pixel art is shown with nearest-neighbour scaling.
+ */
 export class Renderer {
   app = new Application();
-  world = new Container();
-  overlay = new Container();
-  terrainCanvas!: HTMLCanvasElement;
-  ownCanvas!: HTMLCanvasElement;
-  cam = { x: 0, y: 0 };
-  z = 1;
-  private TS = 2;
-  /** Ownership colours are soft fills and lines, so a lower resolution is fine and saves memory. */
-  private ownTS = 1;
-  private terrain!: Sprite;
-  private own!: Sprite;
-  private below = new Graphics();
-  private roadG = new Graphics();
-  private roadVer = '';
-  private particles: { x: number; y: number; vx: number; vy: number; life: number; c: number }[] = [];
-  private landmarkLabels: { type: 'port' | 'airport'; t: Text }[] = [];
-  private nodesL = new Container();
-  private bldL = new Container();
-  private wrkL = new Container();
-  /** AgroCorp's trucks: only for show, worked out from the game state, so every phone draws the same thing. */
-  private agroL = new Container();
-  private trucks: Sprite[] = [];
-  private agroCrew: Sprite[] = [];
-  private routes: { key: string; list: { pts: number[]; kind: TruckKind; offset: number }[] } = { key: '', list: [] };
-  private above = new Graphics();
-  private fx = new Graphics();
-  private nodeSpr = new Map<number, Sprite>();
-  private bSpr = new Map<number, Sprite>();
-  private wSpr = new Map<number, Sprite>();
-  private parishLabels: Text[] = [];
-  private townLabels: Text[] = [];
-  private agroLabel!: Text;
-  private ownVer = -1;
+  mode: 'town' | 'island' = 'town';
+  /** The town slot the town view is showing. */
+  townSlot = 0;
+  /** Town camera (world pixels) and zoom; the island view has its own. */
+  cam = { x: 0, y: 0 }; z = 2.5;
+  icam = { x: 0, y: 0 }; iz = 1;
   /** The guide's pointer: a tile to point at, or null. */
   coachTile: { x: number; y: number } | null = null;
   /** How much of the screen the top bar and the bottom panel cover, so "go there" centres things in the open map. */
   insetTop = 0; insetBottom = 0;
-  private time = 0;
-
   /** Called if the phone's graphics memory gives out, so the game can say so instead of showing a black screen. */
   onContextLost?: () => void;
-  private maxTexture(): number {
-    try {
-      const gl = (this.app.renderer as unknown as { gl?: WebGLRenderingContext }).gl;
-      return gl ? Math.min(4096, gl.getParameter(gl.MAX_TEXTURE_SIZE) as number) : 2048;
-    } catch { return 2048; }
-  }
+
+  private town = new Container();
+  private island = new Container();
+  private overlay = new Container();
+  private ground: Sprite[] = [];
+  private groundCanvas: HTMLCanvasElement[] = [];
+  private groundKey: string[] = [];
+  private below = new Graphics();
+  private objects = new Container();
+  private above = new Graphics();
+  private fx = new Graphics();
+  private nodeSpr = new Map<number, Sprite>();
+  private bSpr = new Map<number, Sprite>();
+  private wSpr = new Map<number, Sprite & { _wx?: number; _wy?: number }>();
+  private crew: Sprite[] = [];
+  private particles: { x: number; y: number; vx: number; vy: number; life: number; c: number }[] = [];
+  private time = 0;
+  // island view
+  islandCanvas!: HTMLCanvasElement;
+  ownCanvas!: HTMLCanvasElement;
+  private islandSpr?: Sprite;
+  private ownSpr?: Sprite;
+  private islandG = new Graphics();
+  private labels: Text[] = [];
+  private banners: { pid: string; t: Text }[] = [];
+  private ownVer = -1;
+  private TS = 1.5;
+
   get vw() { return this.app.screen.width; }
   get vh() { return this.app.screen.height; }
 
   async init(game: GameSession, mount: HTMLElement) {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     // keep GPU memory modest: phones crash and reload the page when a tab uses too much
-    await this.app.init({ preference: 'webgl', resizeTo: window, background: '#0A3478', antialias: false, resolution: dpr, autoDensity: true, powerPreference: 'low-power' });
+    await this.app.init({ preference: 'webgl', resizeTo: window, background: '#1E7FB8', antialias: false, resolution: dpr, autoDensity: true, powerPreference: 'low-power', roundPixels: true });
     this.app.canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); this.onContextLost?.(); });
     this.app.canvas.id = 'game';
-    this.app.canvas.setAttribute('aria-label', 'Map of Barbados');
+    this.app.canvas.setAttribute('aria-label', 'Your town');
     mount.prepend(this.app.canvas);
-    // The island map is painted once into a big image. Cap its longest side so it fits every phone's memory and
-    // texture limits: 2048 px normally, 1536 px on phones that report 4 GB of RAM or less.
     const mem = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 8;
-    const maxGpu = this.maxTexture();
-    const maxSide = Math.min(maxGpu, mem <= 4 ? 1536 : 2048);
-    this.TS = Math.min(dpr >= 1.5 ? 2 : 1.25, maxSide / (Math.max(W, H) * T));
-    this.ownTS = Math.min(1, this.TS);
-    this.app.stage.addChild(this.world, this.overlay);
-    this.bldL.sortableChildren = true; this.wrkL.sortableChildren = true; this.agroL.sortableChildren = true;
-    this.world.addChild(this.roadG, this.below, this.nodesL, this.bldL, this.agroL, this.wrkL, this.above);
+    this.TS = Math.min(dpr >= 1.5 ? 1.6 : 1.1, (mem <= 4 ? 1400 : 2000) / (Math.max(IW, IH) * IT));
+    this.objects.sortableChildren = true;
+    this.town.addChild(this.below, this.objects, this.above);
+    this.app.stage.addChild(this.town, this.island, this.overlay);
+    this.overlay.addChild(this.fx);
     this.setGame(game);
   }
 
   /** (Re)build everything that depends on a particular game. */
   setGame(game: GameSession) {
     const s = game.state;
-    for (const m of [this.nodeSpr, this.bSpr, this.wSpr]) { m.forEach((sp) => sp.destroy()); m.clear(); }
-    this.terrain?.destroy(); this.own?.destroy();
-    this.parishLabels.forEach((t) => t.destroy()); this.townLabels.forEach((t) => t.destroy()); this.agroLabel?.destroy();
-    this.terrainCanvas = bakeTerrain(s, this.TS);
-    this.ownCanvas = bakeOwnership(s, this.ownTS);
-    this.terrain = new Sprite(Texture.from(this.terrainCanvas)); this.terrain.width = W * T; this.terrain.height = H * T;
-    this.own = new Sprite(Texture.from(this.ownCanvas)); this.own.width = W * T; this.own.height = H * T;
-    this.world.addChildAt(this.terrain, 0); this.world.addChildAt(this.own, 1);
+    for (const m of [this.nodeSpr, this.bSpr, this.wSpr]) { m.forEach((sp) => sp.destroy()); (m as Map<number, Sprite>).clear(); }
+    this.crew.forEach((c) => c.destroy()); this.crew = [];
+    // a ground image per town, under everything else in the town view
+    this.ground.forEach((g) => g.destroy());
+    this.ground = []; this.groundCanvas = []; this.groundKey = [];
+    for (let slot = 0; slot < TOWN_SLOTS; slot++) {
+      const c = document.createElement('canvas'); c.width = TOWN * PX; c.height = TOWN * PX;
+      this.groundCanvas.push(c); this.groundKey.push('');
+      const tex = Texture.from(c); tex.source.scaleMode = 'nearest';
+      const sp = new Sprite(tex); const o = townOrigin(slot); sp.position.set(o.x * T, o.y * T);
+      this.town.addChildAt(sp, slot); this.ground.push(sp);
+    }
+    // the island view
+    this.islandSpr?.destroy(); this.ownSpr?.destroy();
+    this.islandCanvas = bakeTerrain(s, this.TS);
+    this.ownCanvas = bakeOwnership(s, Math.min(1, this.TS));
+    this.islandSpr = new Sprite(Texture.from(this.islandCanvas)); this.islandSpr.width = IW * IT; this.islandSpr.height = IH * IT;
+    this.ownSpr = new Sprite(Texture.from(this.ownCanvas)); this.ownSpr.width = IW * IT; this.ownSpr.height = IH * IT;
+    this.island.removeChildren();
+    this.island.addChild(this.islandSpr, this.ownSpr, this.islandG);
     this.ownVer = s.parishVersion;
-    const label = (text: string, size: number, italic = false, weight = '800') => {
-      const t = new Text({ text, style: { fontFamily: LABEL_FONT, fontSize: size, fontWeight: weight as '800', fontStyle: italic ? 'italic' : 'normal', fill: '#ffffff', stroke: { color: '#061028', width: 3, join: 'round' }, letterSpacing: italic ? 0 : 1 }, resolution: Math.min(2, window.devicePixelRatio || 1) });
-      t.anchor.set(0.5); t.alpha = 0.95; this.overlay.addChild(t); return t;
+    this.labels.forEach((t) => t.destroy()); this.banners.forEach((b) => b.t.destroy());
+    const label = (text: string, size: number, fill = '#FFFFFF') => {
+      const t = new Text({ text, style: { fontFamily: LABEL_FONT, fontSize: size, fontWeight: '800', fill, stroke: { color: '#061028', width: 3, join: 'round' }, letterSpacing: 1 }, resolution: Math.min(2, window.devicePixelRatio || 1) });
+      t.anchor.set(0.5); this.overlay.addChild(t); return t;
     };
-    this.parishLabels = s.parishes.map((p) => label(p.name.toUpperCase(), 10.5));
-    this.townLabels = TOWNS.map((t) => label(t.n, 10, true, '600'));
-    this.agroLabel = label('AGROCORP', 9.5);
-    this.landmarkLabels.forEach((l) => l.t.destroy());
-    this.landmarkLabels = (['port', 'airport'] as const).map((type) => ({ type, t: label(type === 'port' ? 'PORT' : 'AIRPORT', 9.5) }));
-    this.roadVer = '';
-    this.routes = { key: '', list: [] };
-    this.overlay.addChild(this.fx);
+    this.labels = [...s.parishes.map((p) => label(p.name.toUpperCase(), 10)), label('PORT', 9.5, '#CFE8FF'), label('AIRPORT', 9.5, '#CFE8FF'), label("AGROCORP'S ESTATE", 9.5, '#FFB4A6')];
+    this.banners = s.players.map((p) => ({ pid: p.id, t: label(p.id === game.me ? 'Your town' : `${p.name}'s town`, 11.5, p.color) }));
+    const me = player(s, game.me);
+    this.townSlot = me?.slot ?? 0;
+    this.mode = 'town';
+    this.s = s;
+    if (me) this.goHome(me.id);
+    this.fitIsland();
+  }
+  private s: State | null = null;
+  /** Back to your own town, at village scale, with your Town Centre in the middle of the open screen. */
+  goHome(pid: string) {
+    const s = this.s, me = s && player(s, pid); if (!s || !me) return;
+    const tc = Object.values(s.buildings).find((b) => b.type === 'tc' && b.owner === pid);
+    this.z = this.defaultZoom();
+    if (tc) this.centerOn(tc.x + 1.5, tc.y + 2); else this.centerOn(townOrigin(me.slot).x + 16, townOrigin(me.slot).y + 16);
   }
 
+  /** About ten tiles across on a phone: village scale. */
+  private defaultZoom() { return Math.max(1.6, Math.min(3.2, this.vw / (10.5 * T), this.vh / (12 * T))); }
+
+  // ---------- cameras
+  showTown(slot: number) { this.mode = 'town'; this.townSlot = slot; this.clampCam(); }
+  /** True until the player pans or zooms the island: till then it keeps fitting the open part of the screen. */
+  private islandAuto = true;
+  showIsland() { this.mode = 'island'; this.islandAuto = true; this.fitIsland(); }
+  /** Fit the whole island in the open part of the screen. */
+  fitIsland() {
+    const top = this.insetTop || 120, bottom = this.insetBottom || 150, h = Math.max(200, this.vh - top - bottom);
+    this.iz = Math.min(this.vw / (IW * IT * 0.92), h / (IH * IT * 0.92));
+    this.icam.x = (IW * IT) / 2 - this.vw / this.iz / 2;
+    this.icam.y = (IH * IT) / 2 - (top + h / 2) / this.iz;
+  }
   clampCam() {
-    const ww = W * T, hh = H * T, vw = this.vw / this.z, vh = this.vh / this.z;
-    this.cam.x = Math.max(-vw * 0.4, Math.min(ww - vw * 0.6, this.cam.x));
-    this.cam.y = Math.max(-vh * 0.4, Math.min(hh - vh * 0.6, this.cam.y));
+    if (this.mode === 'island') return;
+    const o = townOrigin(this.townSlot), x0 = o.x * T, y0 = o.y * T, size = TOWN * T;
+    const vw = this.vw / this.z, vh = this.vh / this.z, m = 2 * T;
+    const fit = (v: number, lo: number, len: number, view: number) => view >= len + 2 * m ? lo + len / 2 - view / 2 : Math.max(lo - m, Math.min(lo + len + m - view, v));
+    this.cam.x = fit(this.cam.x, x0, size, vw);
+    this.cam.y = fit(this.cam.y, y0 - 3 * T, size + 3 * T, vh);
+  }
+  pan(dx: number, dy: number) {
+    if (this.mode === 'island') { this.islandAuto = false; this.icam.x -= dx / this.iz; this.icam.y -= dy / this.iz; return; }
+    this.cam.x -= dx / this.z; this.cam.y -= dy / this.z; this.clampCam();
   }
   zoomAt(sx: number, sy: number, f: number) {
+    if (this.mode === 'island') {
+      this.islandAuto = false;
+      const wx = sx / this.iz + this.icam.x, wy = sy / this.iz + this.icam.y;
+      this.iz = Math.max(0.3, Math.min(3, this.iz * f));
+      this.icam.x = wx - sx / this.iz; this.icam.y = wy - sy / this.iz; return;
+    }
     const wx = sx / this.z + this.cam.x, wy = sy / this.z + this.cam.y;
-    this.z = Math.max(0.55, Math.min(2.6, this.z * f));
+    this.z = Math.max(1, Math.min(5, this.z * f));
     this.cam.x = wx - sx / this.z; this.cam.y = wy - sy / this.z; this.clampCam();
   }
+  /** Centres the town view on a world tile, switching to the town it's in. */
   centerOn(tx: number, ty: number) {
+    const slot = Math.floor(ty / TOWN) * 3 + Math.floor(tx / TOWN);
+    if (slot >= 0 && slot < TOWN_SLOTS) this.townSlot = slot;
+    this.mode = 'town';
     const top = Math.min(this.insetTop, this.vh * 0.4), bottom = Math.min(this.insetBottom, this.vh * 0.55);
     this.cam.x = tx * T - this.vw / this.z / 2;
     this.cam.y = ty * T - (top + (this.vh - top - bottom) / 2) / this.z;
     this.clampCam();
   }
+  /** Screen point to world tile coordinates (town view). */
+  toTile(sx: number, sy: number) { return { x: (sx / this.z + this.cam.x) / T, y: (sy / this.z + this.cam.y) / T }; }
+  /** What's under a tap on the island view: a town banner, AgroCorp's estate label, a landmark, or a parish. */
+  islandHit(s: State, sx: number, sy: number): IslandHit {
+    const near = (t: Text) => t.visible && Math.abs(t.x - sx) < t.width / 2 + 10 && Math.abs(t.y - sy) < t.height / 2 + 10;
+    for (const b of this.banners) if (near(b.t)) return { kind: 'town', pid: b.pid };
+    if (near(this.labels[s.parishes.length + 2])) return { kind: 'estate' };
+    for (const [k, type] of (['port', 'airport'] as Landmark[]).entries()) {
+      const [lx, ly] = LANDMARK_AT[type], [x, y] = this.toScreenI(lx, ly);
+      if (Math.hypot(x - sx, y - sy) < 26 || near(this.labels[s.parishes.length + k])) return { kind: 'landmark', type };
+    }
+    const tx = Math.floor((sx / this.iz + this.icam.x) / IT), ty = Math.floor((sy / this.iz + this.icam.y) / IT);
+    if (tx < 0 || ty < 0 || tx >= IW || ty >= IH) return null;
+    const pid = s.island.pid[ty * IW + tx];
+    return pid >= 0 ? { kind: 'parish', id: pid } : null;
+  }
+  private toScreenI(ix: number, iy: number) { return [(ix * IT - this.icam.x) * this.iz, (iy * IT - this.icam.y) * this.iz] as const; }
 
+  // ---------- each frame
   frame(game: GameSession, view: View, dt: number) {
     const s = game.state;
     this.time += dt;
-    let sx = 0, sy = 0;
-    if (s.weather.stormT > 0 && !RM) { sx = (Math.random() - 0.5) * 6; sy = (Math.random() - 0.5) * 6; }
-    this.world.scale.set(this.z);
-    this.world.position.set(-this.cam.x * this.z + sx, -this.cam.y * this.z + sy);
-    if (s.parishVersion !== this.ownVer) {
-      bakeOwnership(s, this.ownTS, this.ownCanvas); this.own.texture.source.update(); this.ownVer = s.parishVersion;
-    }
-    const rv = `${s.roadVersion}:${s.players.map((p) => p.age).join('')}`;
-    if (rv !== this.roadVer) { this.drawRoads(s); this.roadVer = rv; }
+    const isl = this.mode === 'island';
+    this.town.visible = !isl; this.island.visible = isl;
+    this.app.renderer.background.color = isl ? ISLAND_SEA : TOWN_SEA;
+    for (const t of this.labels) t.visible = isl;
+    for (const b of this.banners) b.t.visible = isl;
     this.tickParticles(dt);
+    if (isl) { if (this.islandAuto) this.fitIsland(); this.drawIsland(s, view); this.fx.clear(); this.drawWeather(s); return; }
+    let sx = 0, sy = 0;
+    if (s.weather.stormT > 0 && !RM) { sx = (Math.random() - 0.5) * 5; sy = (Math.random() - 0.5) * 5; }
+    this.town.scale.set(this.z);
+    this.town.position.set(Math.round(-this.cam.x * this.z + sx), Math.round(-this.cam.y * this.z + sy));
+    this.bakeGround(s, this.townSlot);
     this.drawBelow(s, view, game);
     this.syncNodes(s);
     this.syncBuildings(s);
-    this.syncWorkers(game, view);
-    this.drawTrucks(s, game.alpha);
+    this.syncWorkers(game);
     this.drawCrew(s, game.alpha);
-    this.drawAbove(s, view, game);
-    this.drawLabels(s);
-    this.drawFx(s);
+    this.drawAbove(s, view);
+    this.fx.clear();
+    this.drawWeather(s);
     this.drawSelArrow(s, view);
   }
 
-  /**
-   * What AgroCorp is doing, made visible: white pickups drive from its HQ to survey the parish it wants next (two once
-   * it's about to buy), and cane trucks haul from its plantations to the port. Routes follow the roads.
-   */
-  private agroRoutes(s: State) {
-    const grace = s.time < DIFFICULTY[s.difficulty].grace;
-    const key = `${s.agro.target}:${s.agro.warned}:${grace}:${s.parishVersion}:${s.roadVersion}:${Math.floor(s.time / 20)}`;
-    if (key === this.routes.key) return this.routes.list;
-    const list: typeof this.routes.list = [];
-    const bs = Object.values(s.buildings);
-    const hq = bs.find((b) => b.type === 'hq'), port = bs.find((b) => b.type === 'port');
-    // a free tile next to a building, and the free tile nearest a parish's centre
-    const beside = (x: number, y: number, w: number, h: number) => {
-      for (let r = 1; r <= 3; r++) for (let yy = y - r; yy < y + h + r; yy++) for (let xx = x - r; xx < x + w + r; xx++) {
-        if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
-        const i = yy * W + xx; if (passable(s, i)) return i;
-      }
-      return -1;
-    };
-    const inParish = (pid: number) => {
-      const p = s.parishes[pid], cx = Math.round(p.lx), cy = Math.round(p.ly);
-      for (let r = 0; r <= 6; r++) for (let yy = cy - r; yy <= cy + r; yy++) for (let xx = cx - r; xx <= cx + r; xx++) {
-        if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
-        const i = yy * W + xx; if (s.map.pid[i] === pid && passable(s, i)) return i;
-      }
-      return -1;
-    };
-    const route = (from: number, goal: Goal, kind: TruckKind, offset: number) => {
-      if (from < 0) return;
-      const path = findPath(s, from, goal);
-      if (path && path.length > 2) list.push({ pts: [from, ...path], kind, offset });
-    };
-    if (hq) {
-      const start = beside(hq.x, hq.y, 2, 2);
-      if (!grace && s.agro.target !== null) {
-        const to = inParish(s.agro.target);
-        if (to >= 0) { route(start, { k: 'tile', i: to }, 'survey', 0); if (s.agro.warned) route(start, { k: 'tile', i: to }, 'survey', 0.5); }
-      }
-      if (port) {
-        const farms = s.parishes.filter((p) => p.owner === AGRO).slice(0, 3);
-        farms.forEach((p, k) => route(inParish(p.id), { k: 'rect', x: port.x, y: port.y, w: 2, h: 2 }, 'cane', k * 0.37));
-      }
+  /** Paints a town's ground and paths into its image; redone only when its paths or owner's age change. */
+  private bakeGround(s: State, slot: number) {
+    const o = townOrigin(slot), owner = slot === AGRO_SLOT ? AGRO : s.players.find((p) => p.slot === slot);
+    const key = `${s.roadVersion}:${owner && typeof owner !== 'string' ? owner.age : 0}`;
+    if (this.groundKey[slot] === key) return;
+    this.groundKey[slot] = key;
+    const g = this.groundCanvas[slot].getContext('2d')!; g.imageSmoothingEnabled = false;
+    const kindAt = (lx: number, ly: number) => (lx < 0 || ly < 0 || lx >= TOWN || ly >= TOWN ? 4 : s.map.kind[(o.y + ly) * W + o.x + lx]);
+    const hq = slot === AGRO_SLOT ? Object.values(s.buildings).find((b) => b.type === 'hq') : undefined;
+    for (let ly = 0; ly < TOWN; ly++) for (let lx = 0; lx < TOWN; lx++) {
+      const k = kindAt(lx, ly), X = lx * PX, Y = ly * PX, wx = o.x + lx, wy = o.y + ly;
+      drawGround(g, k, wx, wy, X, Y, (dx, dy) => kindAt(lx + dx, ly + dy));
+      // AgroCorp's estate is planted in cane, apart from round its HQ
+      if (hq && k === 0 && Math.abs(wx - (hq.x + 1)) + Math.abs(wy - (hq.y + 1)) > 5 && (wx + wy * 3) % 7 !== 0) drawCane(g, wx, wy, X, Y);
     }
-    this.routes = { key, list };
-    return list;
-  }
-  private drawTrucks(s: State, alpha: number) {
-    const list = this.agroRoutes(s), t = s.time + alpha * DT, SPEED_T = 3.2, WAIT = 3;
-    while (this.trucks.length < list.length) { const sp = new Sprite(); sp.anchor.set(0.5, 0.85); this.agroL.addChild(sp); this.trucks.push(sp); }
-    this.trucks.forEach((sp, k) => {
-      const r = list[k]; sp.visible = !!r; if (!r) return;
-      const n = r.pts.length - 1, drive = n / SPEED_T, period = 2 * drive + 2 * WAIT;
-      const ph = (((t / period + r.offset) % 1) + 1) % 1 * period;
-      // out, wait at the far end, back, wait at the start
-      let d: number, moving: 1 | -1 | 0;
-      if (ph < drive) { d = ph / drive; moving = 1; }
-      else if (ph < drive + WAIT) { d = 1; moving = 0; }
-      else if (ph < 2 * drive + WAIT) { d = 1 - (ph - drive - WAIT) / drive; moving = -1; }
-      else { d = 0; moving = 0; }
-      const f = d * n, a = Math.min(n - 1, Math.floor(f)), b = a + 1, w = f - a;
-      const ax = r.pts[a] % W, ay = (r.pts[a] / W) | 0, bx = r.pts[b] % W, by = (r.pts[b] / W) | 0;
-      sp.texture = truckTex(r.kind);
-      sp.position.set((ax + (bx - ax) * w + 0.5) * T, (ay + (by - ay) * w + 0.5) * T);
-      sp.zIndex = sp.y;
-      // about a tile long (textures are drawn at 3x); face the way it's driving, and keep facing that way while parked
-      const dx = (bx - ax) * moving, size = 26 / sp.texture.width;
-      const dir = dx ? Math.sign(dx) : Math.sign(sp.scale.x) || 1;
-      sp.scale.set(dir * size, size);
-    });
+    const R = (lx: number, ly: number) => lx >= 0 && ly >= 0 && lx < TOWN && ly < TOWN && s.roads[(o.y + ly) * W + o.x + lx] > 0;
+    for (let ly = 0; ly < TOWN; ly++) for (let lx = 0; lx < TOWN; lx++) {
+      const i = (o.y + ly) * W + o.x + lx; if (!s.roads[i]) continue;
+      const age = roadOwner(s, i)?.age ?? 1, style = s.roads[i] === 1 ? 0 : age <= 2 ? 1 : age === 3 ? 2 : 3;
+      drawPath(g, style, o.x + lx, o.y + ly, lx * PX, ly * PX, { l: R(lx - 1, ly), r: R(lx + 1, ly), u: R(lx, ly - 1), d: R(lx, ly + 1) });
+    }
+    this.ground[slot].texture.source.update();
   }
 
-  /**
-   * AgroCorp's workers, in red: on a building site they work round the frame; at a finished factory farm, mill or
-   * towers they walk out to the fields and back; a few come and go at HQ. Worked out from the game state and clock.
-   */
-  private drawCrew(s: State, alpha: number) {
-    const t = s.time + alpha * DT, spots: { x: number; y: number; flip: boolean }[] = [];
-    for (const b of Object.values(s.buildings)) {
-      if (b.owner !== AGRO) continue;
-      const cx = b.x + 1, cy = b.y + 1, crew = b.type === 'hq' ? 2 : b.done ? 2 : 3;
-      for (let k = 0; k < crew; k++) {
-        const seed = b.id * 7 + k * 13, ph = t * (b.done ? 0.12 : 0.22) + seed * 0.37;
-        let x: number, y: number, flip: boolean;
-        if (!b.done) {
-          // round the site's edge
-          const a = ph * Math.PI * 2; x = cx + Math.cos(a) * 1.35; y = cy + 0.4 + Math.sin(a) * 1.1; flip = Math.sin(a) > 0;
-        } else {
-          // out to a spot a few tiles away and back again
-          const ang = (seed % 360) * Math.PI / 180, far = 2.2 + (seed % 3) * 0.6;
-          const u = ph % 1, d = u < 0.5 ? u * 2 : 2 - u * 2;
-          x = cx + Math.cos(ang) * far * d; y = cy + 0.9 + Math.sin(ang) * far * d * 0.8;
-          flip = (Math.cos(ang) < 0) !== (u >= 0.5);
-        }
-        const i = Math.round(x) + Math.round(y) * W;
-        if (x < 0 || y < 0 || x >= W || y >= H || !s.map.land[i]) continue;
-        spots.push({ x, y, flip });
-      }
-    }
-    while (this.agroCrew.length < spots.length) { const sp = new Sprite(workerTex('#E2553F', 4)); sp.anchor.set(0.5, 0.9); this.agroL.addChild(sp); this.agroCrew.push(sp); }
-    this.agroCrew.forEach((sp, k) => {
-      const p = spots[k]; sp.visible = !!p; if (!p) return;
-      // the same size as a co-op's workers (16x20)
-      const size = 16 / sp.texture.width;
-      sp.position.set(p.x * T, p.y * T); sp.zIndex = sp.y; sp.scale.set(p.flip ? -size : size, size);
-    });
+  private inView(x: number, y: number, pad = 3) {
+    const x0 = this.cam.x / T - pad, y0 = this.cam.y / T - pad, x1 = (this.cam.x + this.vw / this.z) / T + pad, y1 = (this.cam.y + this.vh / this.z) / T + pad;
+    return x >= x0 && x <= x1 && y >= y0 && y <= y1;
   }
 
   private drawBelow(s: State, view: View, game: GameSession) {
     const g = this.below; g.clear();
-    const sel = view.sel;
-    if (sel?.kind === 'parish') {
-      const p = s.parishes[sel.id]; const pts = p.poly.map((v) => v * T);
-      g.poly(pts).fill({ color: 0xffc726, alpha: 0.12 }).stroke({ width: 3 / this.z, color: 0xffc726 });
-    }
-    if (s.agro.warned && s.agro.target !== null) {
-      const pts = s.parishes[s.agro.target].poly.map((v) => v * T), pulse = 0.55 + 0.45 * Math.sin(this.time * 5);
-      g.poly(pts).fill({ color: 0xe2553f, alpha: 0.12 * pulse }).stroke({ width: 3 / this.z, color: 0xff6a52, alpha: pulse });
-    }
     if (view.roadMode) {
-      // every road in pale, the part your buildings connect to in gold, and the tiles being drawn now
-      const net = roadNetwork(s, game.me);
-      for (let i = 0; i < W * H; i++) if (s.roads[i] && !net[i]) g.rect((i % W) * T + 3, ((i / W) | 0) * T + 3, T - 6, T - 6);
-      g.fill({ color: 0xffffff, alpha: 0.28 });
-      for (let i = 0; i < W * H; i++) if (net[i]) g.rect((i % W) * T + 3, ((i / W) | 0) * T + 3, T - 6, T - 6);
-      g.fill({ color: 0xffc726, alpha: 0.45 });
-      for (const i of view.roadDraft) g.rect((i % W) * T + 2, ((i / W) | 0) * T + 2, T - 4, T - 4);
-      g.fill({ color: 0xeadfbe, alpha: 0.9 });
+      for (const i of view.roadDraft) g.rect((i % W) * T + 1, ((i / W) | 0) * T + 1, T - 2, T - 2);
+      g.fill({ color: 0xeadfbe, alpha: 0.85 });
     }
     if (view.buildMode) {
-      const x0 = Math.max(0, Math.floor(this.cam.x / T) - 1), y0 = Math.max(0, Math.floor(this.cam.y / T) - 1);
-      const x1 = Math.min(W - 1, Math.ceil((this.cam.x + this.vw / this.z) / T) + 1), y1 = Math.min(H - 1, Math.ceil((this.cam.y + this.vh / this.z) / T) + 1);
-      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++)
-        if (!placeBlock(s, game.me, view.buildMode, x, y)) g.rect(x * T + 1, y * T + 1, T - 2, T - 2);
-      g.fill({ color: 0xffec96, alpha: 0.22 });
+      // every spot where the building would fit, in pale gold
+      const d = BT[view.buildMode];
+      const x0 = Math.floor(this.cam.x / T) - 1, y0 = Math.floor(this.cam.y / T) - 1;
+      const x1 = Math.ceil((this.cam.x + this.vw / this.z) / T) + 1, y1 = Math.ceil((this.cam.y + this.vh / this.z) / T) + 1;
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (x >= 0 && y >= 0 && !placeBlock(s, game.me, view.buildMode, x, y)) g.rect(x * T + 2, y * T + 2, T - 4, T - 4);
+      g.fill({ color: 0xffec96, alpha: 0.3 });
+      void d;
     }
-    const showWalls = view.buildMode === 'seawall' || (sel?.kind === 'building' && s.buildings[sel.id]?.type === 'seawall');
+    const showWalls = view.buildMode === 'seawall' || (view.sel?.kind === 'building' && s.buildings[view.sel.id]?.type === 'seawall');
     if (showWalls) for (const b of Object.values(s.buildings)) if (b.type === 'seawall' && b.done)
-      g.circle((b.x + 0.5) * T, (b.y + 0.5) * T, SEA_R * T).fill({ color: 0x5bc0eb, alpha: 0.08 }).stroke({ width: 1.5, color: 0x5bc0eb, alpha: 0.85 });
+      g.circle((b.x + 0.5) * T, (b.y + 0.5) * T, SEA_R * T).fill({ color: 0x5bc0eb, alpha: 0.1 }).stroke({ width: 1, color: 0x5bc0eb, alpha: 0.85 });
   }
 
-  /** Roads players have built, styled by the builder's age: dirt tracks, then coral stone, then paved. Highways are painted into the terrain. */
-  private drawRoads(s: State) {
-    const g = this.roadG; g.clear();
-    const R = (i: number) => s.roads[i] > 0;
-    const styles = [
-      { test: (a: number) => a <= 2, edge: 0x5c4326, top: 0xc9a66b, w: 0.15 },
-      { test: (a: number) => a === 3, edge: 0x3c301c, top: 0xeadfbe, w: 0.17 },
-      { test: (a: number) => a >= 4, edge: 0x22252a, top: 0x4a4f57, w: 0.2 },
-    ];
-    const links = (i: number, fn: (x0: number, y0: number, x1: number, y1: number) => void) => {
-      const tx = i % W, ty = (i / W) | 0, x = tx + 0.5, y = ty + 0.5;
-      for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [1, -1], [-1, 0], [0, -1], [-1, -1], [-1, 1]]) {
-        const nx = tx + dx, ny = ty + dy;
-        if (nx < 0 || ny < 0 || nx >= W || ny >= H || !R(ny * W + nx)) continue;
-        // join diagonally only when there's no straight route round the corner
-        if (dx && dy && (R(ty * W + nx) || R(ny * W + tx))) continue;
-        fn(x * T, y * T, (x + dx * 0.5) * T, (y + dy * 0.5) * T);
-      }
-    };
-    for (const st of styles) {
-      const tiles: number[] = [];
-      for (let i = 0; i < W * H; i++) if (s.roads[i] >= 2 && st.test(roadOwner(s, i)?.age ?? 3)) tiles.push(i);
-      if (!tiles.length) continue;
-      for (const i of tiles) links(i, (a, b, c, d) => g.moveTo(a, b).lineTo(c, d));
-      g.stroke({ width: (st.w * 2) * T, color: st.edge, alpha: 0.3, cap: 'round' });
-      for (const i of tiles) g.circle((i % W + 0.5) * T, ((i / W | 0) + 0.5) * T, st.w * T);
-      g.fill({ color: st.top });
-      for (const i of tiles) links(i, (a, b, c, d) => g.moveTo(a, b).lineTo(c, d));
-      g.stroke({ width: st.w * 2 * T, color: st.top, cap: 'round' });
+  /** A sprite in the depth-sorted layer: things lower on screen draw over things behind them. */
+  private place(sp: Sprite, x: number, y: number, depth: number) { sp.position.set(Math.round(x), Math.round(y)); sp.zIndex = depth; }
+
+  private syncNodes(s: State) {
+    for (const n of s.nodes) {
+      let sp = this.nodeSpr.get(n.id);
+      if (n.amt <= 0) { if (sp) { sp.destroy(); this.nodeSpr.delete(n.id); } continue; }
+      const share = n.max === Infinity ? 1 : n.amt / n.max;
+      const tex = nodeTex(n.type, n.id, share);
+      if (!sp) { sp = new Sprite(tex); sp.anchor.set(0.5, 1); this.objects.addChild(sp); this.nodeSpr.set(n.id, sp); }
+      if (sp.texture !== tex) sp.texture = tex;
+      sp.visible = this.inView(n.x, n.y);
+      if (!sp.visible) continue;
+      const bob = n.type === 'fish' && !RM ? Math.round(Math.sin(this.time * 2 + n.i)) : 0;
+      this.place(sp, (n.x + 0.5) * T, (n.y + 1) * T + bob + 4, n.type === 'fish' ? -1e6 : (n.y + 1) * T);
     }
+  }
+
+  private syncBuildings(s: State) {
+    const seen = new Set<number>();
+    for (const b of Object.values(s.buildings)) {
+      seen.add(b.id);
+      let sp = this.bSpr.get(b.id);
+      const look = b.type === 'house' ? b.lvl : player(s, b.owner)?.age ?? 3;
+      const tex = buildingTex(b.type, b.w, b.h, look, b.variant, !b.done);
+      if (!sp) { sp = new Sprite(tex); sp.anchor.set(0, 1); this.objects.addChild(sp); this.bSpr.set(b.id, sp); }
+      if (sp.texture !== tex) sp.texture = tex;
+      sp.visible = this.inView(b.x + b.w / 2, b.y + b.h / 2, 5);
+      // a dry cistern looks a little faded in a drought
+      sp.alpha = b.type === 'cistern' && drought(s) ? 0.8 : 1;
+      this.place(sp, b.x * T, (b.y + b.h) * T, (b.y + b.h) * T - 1);
+    }
+    for (const [id, sp] of this.bSpr) if (!seen.has(id)) { sp.destroy(); this.bSpr.delete(id); }
+  }
+
+  private syncWorkers(game: GameSession) {
+    const s = game.state, seen = new Set<number>(), a = game.alpha;
+    for (const w of Object.values(s.workers)) {
+      seen.add(w.id);
+      const owner = player(s, w.owner), moving = !!w.path?.length;
+      const frame = moving && !RM ? Math.floor(this.time * 6 + w.id) % 2 : 0;
+      const tex = workerTex(owner?.color ?? '#ffffff', owner?.age ?? 1, frame, w.amt >= 1 ? w.carry : null);
+      let sp = this.wSpr.get(w.id);
+      if (!sp) { sp = new Sprite(tex); sp.anchor.set(0.5, 0.95); this.objects.addChild(sp); this.wSpr.set(w.id, sp); }
+      if (sp.texture !== tex) sp.texture = tex;
+      const p = game.prevPos(w.id) ?? w;
+      const x = p.x + (w.x - p.x) * a, y = p.y + (w.y - p.y) * a;
+      sp._wx = x; sp._wy = y;
+      sp.visible = this.inView(x, y);
+      sp.scale.x = (w.face || 1) < 0 ? -1 : 1;
+      this.place(sp, x * T, y * T + 6, y * T + 6);
+    }
+    for (const [id, sp] of this.wSpr) if (!seen.has(id)) { sp.destroy(); this.wSpr.delete(id); }
+  }
+  /** World position of a worker as drawn this frame (interpolated). */
+  workerPos(id: number): { x: number; y: number } | null {
+    const sp = this.wSpr.get(id);
+    return sp && sp._wx !== undefined ? { x: sp._wx, y: sp._wy! } : null;
+  }
+
+  /**
+   * AgroCorp's workers, in red: they work round a building site, walk out to the cane and back from finished
+   * buildings, and come and go at HQ. Worked out from the game state and clock, so every phone shows the same.
+   */
+  private drawCrew(s: State, alpha: number) {
+    const t = s.time + alpha * DT, spots: { x: number; y: number; flip: boolean; frame: number }[] = [];
+    if (this.townSlot === AGRO_SLOT) for (const b of Object.values(s.buildings)) {
+      if (b.owner !== AGRO) continue;
+      const cx = b.x + b.w / 2, cy = b.y + b.h + 0.4, crew = b.type === 'hq' ? 3 : b.done ? 2 : 3;
+      for (let k = 0; k < crew; k++) {
+        const seed = b.id * 7 + k * 13, ph = t * (b.done ? 0.1 : 0.2) + seed * 0.37;
+        let x: number, y: number, flip: boolean;
+        if (!b.done) { const an = ph * Math.PI * 2; x = cx + Math.cos(an) * 1.9; y = cy - 1.5 + Math.sin(an) * 1.6; flip = Math.sin(an) > 0; }
+        else {
+          const ang = (seed % 360) * Math.PI / 180, far = 3 + (seed % 3);
+          const u = ph % 1, d = u < 0.5 ? u * 2 : 2 - u * 2;
+          x = cx + Math.cos(ang) * far * d; y = cy + Math.abs(Math.sin(ang)) * far * d * 0.8; flip = (Math.cos(ang) < 0) !== (u >= 0.5);
+        }
+        spots.push({ x, y, flip, frame: Math.floor(t * 5 + k) % 2 });
+      }
+    }
+    while (this.crew.length < spots.length) { const sp = new Sprite(); sp.anchor.set(0.5, 0.95); this.objects.addChild(sp); this.crew.push(sp); }
+    this.crew.forEach((sp, k) => {
+      const p = spots[k]; sp.visible = !!p; if (!p) return;
+      sp.texture = workerTex('#E2553F', 4, p.frame, null);
+      sp.scale.x = p.flip ? -1 : 1;
+      this.place(sp, p.x * T, p.y * T, p.y * T);
+    });
   }
 
   /** A burst of flag-coloured confetti from each of a player's buildings, for an age-up. */
@@ -335,133 +379,83 @@ export class Renderer {
     for (const b of Object.values(s.buildings)) {
       if (b.owner !== owner || !b.done) continue;
       const cx = (b.x + b.w / 2) * T, cy = (b.y + b.h / 2) * T;
-      for (let k = 0; k < 14; k++) {
-        const a = Math.random() * Math.PI * 2, v = 30 + Math.random() * 60;
-        this.particles.push({ x: cx, y: cy, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 50, life: 1.6 + Math.random() * 0.8, c: cols[k % cols.length] });
+      for (let k = 0; k < 10; k++) {
+        const an = Math.random() * Math.PI * 2, v = 20 + Math.random() * 40;
+        this.particles.push({ x: cx, y: cy, vx: Math.cos(an) * v, vy: Math.sin(an) * v - 40, life: 1.6 + Math.random() * 0.8, c: cols[k % cols.length] });
       }
     }
   }
   private tickParticles(dt: number) {
     if (RM) { this.particles = []; return; }
-    for (const p of this.particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 90 * dt; p.vx *= 0.98; p.life -= dt; }
+    for (const p of this.particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 60 * dt; p.vx *= 0.98; p.life -= dt; }
     this.particles = this.particles.filter((p) => p.life > 0);
   }
 
-  private syncNodes(s: State) {
-    for (const n of s.nodes) {
-      let sp = this.nodeSpr.get(n.id);
-      if (n.amt <= 0) { if (sp) { sp.destroy(); this.nodeSpr.delete(n.id); } continue; }
-      if (!sp) { sp = new Sprite(nodeTex(n.type)); sp.anchor.set(0.5, 1); this.nodesL.addChild(sp); this.nodeSpr.set(n.id, sp); }
-      const sc = n.max === Infinity ? 1 : 0.65 + 0.35 * (n.amt / n.max);
-      sp.width = T * sc; sp.height = T * sc;
-      const bob = n.type === 'fish' && !RM ? Math.sin(this.time * 2 + n.i) * 1.5 : 0;
-      sp.position.set((n.x + 0.5) * T, (n.y + 1) * T - (1 - sc) * 4 + bob);
-    }
-  }
-
-  private syncBuildings(s: State) {
-    const seen = new Set<number>();
-    const dry = drought(s);
-    for (const b of Object.values(s.buildings)) {
-      seen.add(b.id);
-      let sp = this.bSpr.get(b.id);
-      const tex = buildingTex(b.type, b.variant, { dry: b.type === 'cistern' && dry, foundation: !b.done, age: b.type === 'house' ? b.lvl : player(s, b.owner)?.age ?? 3 });
-      if (!sp) { sp = new Sprite(tex); this.bldL.addChild(sp); this.bSpr.set(b.id, sp); }
-      if (sp.texture !== tex) sp.texture = tex;
-      sp.width = b.w * T; sp.height = b.h * T; sp.position.set(b.x * T, b.y * T); sp.zIndex = b.y;
-    }
-    for (const [id, sp] of this.bSpr) if (!seen.has(id)) { sp.destroy(); this.bSpr.delete(id); }
-  }
-
-  private syncWorkers(game: GameSession, view: View) {
-    const s = game.state, seen = new Set<number>(), a = game.alpha;
-    for (const w of Object.values(s.workers)) {
-      seen.add(w.id);
-      let sp = this.wSpr.get(w.id);
-      const owner = player(s, w.owner), tex = workerTex(owner?.color ?? '#ffffff', owner?.age ?? 3);
-      if (!sp) { sp = new Sprite(tex); sp.anchor.set(0.5, 0.6); this.wrkL.addChild(sp); this.wSpr.set(w.id, sp); }
-      if (sp.texture !== tex) sp.texture = tex;
-      sp.width = 16; sp.height = 20;
-      const p = game.prevPos(w.id) ?? w;
-      const x = p.x + (w.x - p.x) * a, y = p.y + (w.y - p.y) * a;
-      const moving = !!w.path?.length, bob = moving && !RM ? Math.sin(this.time * 14 + w.id) * 1.2 : 0;
-      sp.position.set(x * T, y * T + bob); sp.zIndex = y;
-      (sp as Sprite & { _wx?: number; _wy?: number })._wx = x; (sp as Sprite & { _wy?: number })._wy = y;
-    }
-    for (const [id, sp] of this.wSpr) if (!seen.has(id)) { sp.destroy(); this.wSpr.delete(id); }
-    void view;
-  }
-
-  /** World position of a worker as drawn this frame (interpolated). */
-  workerPos(id: number): { x: number; y: number } | null {
-    const sp = this.wSpr.get(id) as (Sprite & { _wx?: number; _wy?: number }) | undefined;
-    return sp && sp._wx !== undefined ? { x: sp._wx, y: sp._wy! } : null;
-  }
-
-  private drawAbove(s: State, view: View, game: GameSession) {
+  private drawAbove(s: State, view: View) {
     const g = this.above; g.clear();
     const bar = (x: number, y: number, w: number, f: number, col: number) => {
-      g.rect(x + 2, y, w - 4, 4).fill({ color: 0x000000, alpha: 0.55 });
-      g.rect(x + 2, y, (w - 4) * Math.max(0, Math.min(1, f)), 4).fill(col);
+      g.rect(x + 2, y, w - 4, 3).fill({ color: 0x000000, alpha: 0.55 });
+      g.rect(x + 2, y, (w - 4) * Math.max(0, Math.min(1, f)), 3).fill(col);
     };
     for (const b of Object.values(s.buildings)) {
+      if (!this.inView(b.x, b.y, 4)) continue;
       const x = b.x * T, y = b.y * T, w = b.w * T, h = b.h * T;
-      if (!b.done) { bar(x, y + h - 5, w, b.progress, 0xffc726); continue; }
-      if (b.pest > 0) for (let k = 0; k < 6; k++) { const an = k * 1.7 + this.time * 3; g.circle(x + 12 + Math.cos(an) * 7, y + 12 + Math.sin(an * 1.3) * 7, 1.4).fill(0x2a1a10); }
-      if (b.hp < b.maxHp) { const f = b.hp / b.maxHp; bar(x, y - 5, w, f, f > 0.5 ? 0x6cc24a : f > 0.25 ? 0xffb03a : 0xe2553f); }
+      if (!b.done) { bar(x, y + h - 4, w, b.progress, 0xffc726); continue; }
+      if (b.pest > 0) for (let k = 0; k < 6; k++) { const an = k * 1.7 + this.time * 3; g.rect(x + w / 2 + Math.cos(an) * 8, y + h / 2 + Math.sin(an * 1.3) * 6, 1.5, 1.5).fill(0x2a1a10); }
+      if (b.hp < b.maxHp) { const f = b.hp / b.maxHp; bar(x, y - 6, w, f, f > 0.5 ? 0x6cc24a : f > 0.25 ? 0xffb03a : 0xe2553f); }
     }
     // whatever is selected glows gold and pulses, the same gold as the panel that describes it
     const sel = view.sel, pulse = RM ? 0.8 : 0.5 + 0.5 * Math.sin(this.time * 4.5), GOLD = 0xffc726;
     const box = (x: number, y: number, w: number, h: number) => {
-      g.roundRect(x - 3, y - 3, w + 6, h + 6, 5).stroke({ width: 6 / Math.max(this.z, 0.8), color: GOLD, alpha: 0.18 + 0.22 * pulse });
-      g.roundRect(x - 1, y - 1, w + 2, h + 2, 4).stroke({ width: 2.2, color: GOLD });
+      g.roundRect(x - 2, y - 2, w + 4, h + 4, 3).stroke({ width: 3, color: GOLD, alpha: 0.2 + 0.25 * pulse });
+      g.roundRect(x - 0.5, y - 0.5, w + 1, h + 1, 2).stroke({ width: 1.2, color: GOLD });
     };
     const selB = sel?.kind === 'building' ? s.buildings[sel.id] : sel?.kind === 'player' ? Object.values(s.buildings).find((b) => b.owner === sel.id && b.type === 'tc') : undefined;
     if (selB) box(selB.x * T, selB.y * T, selB.w * T, selB.h * T);
     if (sel?.kind === 'node') {
       const n = s.nodes[sel.id];
-      if (n) { const cx = (n.x + 0.5) * T, cy = (n.y + 0.5) * T; g.circle(cx, cy, 15 + 2 * pulse).stroke({ width: 5, color: GOLD, alpha: 0.18 + 0.22 * pulse }); g.circle(cx, cy, 13).stroke({ width: 2.2, color: GOLD }); }
+      if (n) { const cx = (n.x + 0.5) * T, cy = (n.y + 0.6) * T; g.ellipse(cx, cy, 10 + pulse, 6 + pulse).stroke({ width: 3, color: GOLD, alpha: 0.2 + 0.25 * pulse }); g.ellipse(cx, cy, 9, 5).stroke({ width: 1.2, color: GOLD }); }
     }
     const ids = sel?.kind === 'workers' ? sel.ids : null;
     for (const w of Object.values(s.workers)) {
-      const p = this.workerPos(w.id); if (!p) continue;
-      const x = p.x * T, y = p.y * T;
+      const p = this.workerPos(w.id); if (!p || !this.inView(p.x, p.y)) continue;
+      const x = p.x * T, y = p.y * T + 6;
       if (ids?.has(w.id)) {
-        g.ellipse(x, y + 5, 9, 4.2).stroke({ width: 4, color: GOLD, alpha: 0.2 + 0.25 * pulse }).ellipse(x, y + 5, 8, 3.6).stroke({ width: 2, color: GOLD });
-        // a little bobbing marker over each selected worker (when only a few are selected)
-        if (ids.size <= 12) { const by = y - 17 - 2 * pulse; g.poly([x - 4, by - 4, x + 4, by - 4, x, by + 1.5]).fill(GOLD).stroke({ width: 1, color: 0x5a3f00 }); }
+        g.ellipse(x, y, 6, 2.6).stroke({ width: 2.5, color: GOLD, alpha: 0.25 + 0.25 * pulse }).ellipse(x, y, 5.5, 2.2).stroke({ width: 1, color: GOLD });
+        if (ids.size <= 12) { const by = y - 22 - 1.5 * pulse; g.poly([x - 3, by - 3, x + 3, by - 3, x, by + 1]).fill(GOLD).stroke({ width: 0.8, color: 0x5a3f00 }); }
       }
       if (w.working && !RM) {
+        // a hoe or cutlass swinging
         const an = Math.sin(this.time * 10 + w.id) * 0.9, f = w.face || 1;
-        g.moveTo(x + 4 * f, y - 2).lineTo(x + (4 + Math.cos(an) * 6) * f, y - 2 - Math.sin(an) * 6).stroke({ width: 1.6, color: 0x4a3420 });
+        g.moveTo(x + 3 * f, y - 9).lineTo(x + (3 + Math.cos(an) * 5) * f, y - 9 - Math.sin(an) * 5).stroke({ width: 1, color: 0x4a3420 });
       }
-      if (w.amt >= 1) g.circle(x - (w.face || 1) * 5, y - 3, 3).fill(w.carry === 'food' ? 0x6cc24a : w.carry === 'water' ? 0x5bc0eb : 0xe7e0cc).stroke({ width: 1, color: 0x000000, alpha: 0.4 });
     }
-    for (const p of this.particles) g.rect(p.x - 1.6, p.y - 1.6, 3.2, 3.2).fill({ color: p.c, alpha: Math.min(1, p.life * 1.5) });
+    for (const p of this.particles) g.rect(p.x - 1, p.y - 1, 2, 2).fill({ color: p.c, alpha: Math.min(1, p.life * 1.5) });
     // the guide's bouncing pointer over the thing to tap next
     if (this.coachTile) {
-      const x = this.coachTile.x * T, bob = RM ? 0 : Math.abs(Math.sin(this.time * 3.2)) * 7, y = this.coachTile.y * T - 26 - bob;
-      g.circle(this.coachTile.x * T, this.coachTile.y * T, 14 + (RM ? 0 : Math.sin(this.time * 3.2) * 2)).stroke({ width: 2.5, color: 0xffc726, alpha: 0.75 });
-      g.poly([x - 9, y - 10, x + 9, y - 10, x + 9, y - 2, x + 14, y - 2, x, y + 11, x - 14, y - 2, x - 9, y - 2]).fill(0xffc726).stroke({ width: 2, color: 0x3a2a00 });
+      const cx = this.coachTile.x * T, bob = RM ? 0 : Math.abs(Math.sin(this.time * 3.2)) * 5, y = this.coachTile.y * T - 22 - bob;
+      g.ellipse(cx, this.coachTile.y * T + 4, 9 + (RM ? 0 : Math.sin(this.time * 3.2) * 1.5), 5).stroke({ width: 1.5, color: GOLD, alpha: 0.8 });
+      g.poly([cx - 5, y - 7, cx + 5, y - 7, cx + 5, y - 2, cx + 9, y - 2, cx, y + 7, cx - 9, y - 2, cx - 5, y - 2]).fill(GOLD).stroke({ width: 1.2, color: 0x3a2a00 });
     }
-    for (const m of view.marks) g.circle(m.x * T, m.y * T, (1 - m.t / 0.7) * 10 + 4).stroke({ width: 2, color: 0xffc726, alpha: m.t / 0.7 });
-    void game;
+    for (const m of view.marks) g.circle(m.x * T, m.y * T, (1 - m.t / 0.7) * 7 + 3).stroke({ width: 1.5, color: GOLD, alpha: m.t / 0.7 });
   }
 
-  /** Where the selection is, in tiles: the middle of a building, worker group, resource or parish. */
+  /** Where the selection is, in tiles. */
   selCenter(s: State, view: View): { x: number; y: number } | null {
     const sel = view.sel; if (!sel) return null;
     if (sel.kind === 'building') { const b = s.buildings[sel.id]; return b ? { x: b.x + b.w / 2, y: b.y + b.h / 2 } : null; }
     if (sel.kind === 'node') { const n = s.nodes[sel.id]; return n ? { x: n.x + 0.5, y: n.y + 0.5 } : null; }
-    if (sel.kind === 'parish') { const p = s.parishes[sel.id]; return { x: p.lx, y: p.ly }; }
-    if (sel.kind === 'player') { const b = Object.values(s.buildings).find((q) => q.owner === sel.id && q.type === 'tc'); return b ? { x: b.x + 1, y: b.y + 1 } : null; }
-    let sx = 0, sy = 0, n = 0;
-    for (const id of sel.ids) { const p = this.workerPos(id); if (p) { sx += p.x; sy += p.y; n++; } }
-    return n ? { x: sx / n, y: sy / n } : null;
+    if (sel.kind === 'player') { const b = Object.values(s.buildings).find((q) => q.owner === sel.id && q.type === 'tc'); return b ? { x: b.x + 1.5, y: b.y + 1.5 } : null; }
+    if (sel.kind === 'workers') {
+      let sx = 0, sy = 0, n = 0;
+      for (const id of sel.ids) { const p = this.workerPos(id); if (p) { sx += p.x; sy += p.y; n++; } }
+      return n ? { x: sx / n, y: sy / n } : null;
+    }
+    return null;
   }
   /** When the selected thing is off screen, a gold arrow at the edge points the way to it. */
   private drawSelArrow(s: State, view: View) {
-    const at = this.selCenter(s, view); if (!at || view.sel?.kind === 'parish') return;
+    const at = this.selCenter(s, view); if (!at) return;
     const sx = (at.x * T - this.cam.x) * this.z, sy = (at.y * T - this.cam.y) * this.z;
     const top = Math.max(60, this.insetTop + 10), bottom = Math.min(this.vh - 60, this.vh - this.insetBottom - 10), m = 26;
     if (sx > m && sx < this.vw - m && sy > top && sy < bottom) return;
@@ -473,31 +467,57 @@ export class Renderer {
     this.fx.poly([...pt(14, 0), ...pt(11, 2.5), ...pt(4, Math.PI), ...pt(11, -2.5)]).fill(0xffc726).stroke({ width: 2, color: 0x3a2a00 });
   }
 
-  private drawLabels(s: State) {
-    const toS = (tx: number, ty: number) => [(tx * T - this.cam.x) * this.z, (ty * T - this.cam.y) * this.z];
-    s.parishes.forEach((p, k) => {
-      const t = this.parishLabels[k], [x, y] = toS(p.lx, p.ly);
-      t.position.set(x, y);
-      const o = p.owner;
-      const col = o === 'agro' ? '#FFB4A6' : o ? (s.players.find((q) => q.id === o)?.color ?? '#FFFFFF') : '#FFFFFF';
-      if (t.style.fill !== col) t.style.fill = col;
-    });
-    const showTowns = this.z >= 0.6;
-    TOWNS.forEach((tw, k) => { const t = this.townLabels[k]; t.visible = showTowns; if (showTowns) { const [x, y] = toS(tw.x, tw.y - tw.s * 0.62 - 0.5); t.position.set(x, y); } });
-    for (const l of this.landmarkLabels) {
-      const b = Object.values(s.buildings).find((q) => q.type === l.type);
-      if (b) { const [x, y] = toS(b.x + 1, b.y + 2); l.t.position.set(x, y + 9); l.t.style.fill = '#CFE8FF'; }
-    }
-    const hq = Object.values(s.buildings).find((b) => b.type === 'hq');
-    if (hq) { const [x, y] = toS(hq.x + 1, hq.y + 2); this.agroLabel.position.set(x, y + 9); this.agroLabel.style.fill = '#FFB4A6'; }
-  }
-
-  private drawFx(s: State) {
-    const g = this.fx; g.clear();
+  /** Storm clouds and rain; a warm haze in a drought. */
+  private drawWeather(s: State) {
+    const g = this.fx;
     if (s.weather.stormT > 0) {
       const a = Math.min(1, s.weather.stormT / 1.5) * 0.4;
       g.rect(0, 0, this.vw, this.vh).fill({ color: 0x141e32, alpha: a });
       if (!RM) { for (let k = 0; k < 90; k++) { const rx = Math.random() * this.vw, ry = Math.random() * this.vh; g.moveTo(rx, ry).lineTo(rx - 10, ry + 18); } g.stroke({ width: 1, color: 0xc8dcff, alpha: 0.45 }); }
     } else if (drought(s)) g.rect(0, 0, this.vw, this.vh).fill({ color: 0xffaa3c, alpha: 0.08 });
+  }
+
+  // ---------- the island view
+  private drawIsland(s: State, view: View) {
+    this.island.scale.set(this.iz);
+    this.island.position.set(-this.icam.x * this.iz, -this.icam.y * this.iz);
+    if (s.parishVersion !== this.ownVer) { bakeOwnership(s, Math.min(1, this.TS), this.ownCanvas); this.ownSpr!.texture.source.update(); this.ownVer = s.parishVersion; }
+    const g = this.islandG; g.clear();
+    const sel = view.sel;
+    if (sel?.kind === 'parish') g.poly(s.parishes[sel.id].poly.map((v) => v * IT)).fill({ color: 0xffc726, alpha: 0.14 }).stroke({ width: 3 / this.iz, color: 0xffc726 });
+    if (s.agro.warned && s.agro.target !== null) {
+      const pulse = 0.55 + 0.45 * Math.sin(this.time * 5);
+      g.poly(s.parishes[s.agro.target].poly.map((v) => v * IT)).fill({ color: 0xe2553f, alpha: 0.14 * pulse }).stroke({ width: 3 / this.iz, color: 0xff6a52, alpha: pulse });
+    }
+    // co-op stands: a little flag in the parish's colour
+    for (const p of s.parishes) {
+      if (!p.stand) continue;
+      const col = p.stand === AGRO ? 0xe2553f : parseInt((player(s, p.stand)?.color ?? '#ffffff').slice(1), 16);
+      const x = p.lx * IT + 14, y = p.ly * IT + 6;
+      g.rect(x, y - 14, 1.6, 16).fill(0x2a1e14);
+      g.poly([x + 1.6, y - 14, x + 12, y - 10, x + 1.6, y - 6]).fill(col).stroke({ width: 1, color: 0x2a1e14 });
+    }
+    for (const type of ['port', 'airport'] as Landmark[]) {
+      const [lx, ly] = LANDMARK_AT[type];
+      g.circle(lx * IT, ly * IT, 9).fill(0xffffff).stroke({ width: 2, color: 0x0a3478 });
+      if (type === 'port') g.rect(lx * IT - 5, ly * IT - 1, 10, 4).fill(0x0a3478).rect(lx * IT - 1, ly * IT - 6, 2, 5).fill(0x0a3478);
+      else g.poly([lx * IT - 6, ly * IT + 1, lx * IT + 6, ly * IT - 3, lx * IT + 6, ly * IT, lx * IT - 3, ly * IT + 3]).fill(0x0a3478);
+    }
+    // labels and town banners, kept upright at screen size
+    s.parishes.forEach((p, k) => {
+      const t = this.labels[k], [x, y] = this.toScreenI(p.lx, p.ly - 0.6);
+      t.position.set(x, y);
+      const col = p.owner === AGRO ? '#FFB4A6' : p.owner ? (player(s, p.owner)?.color ?? '#FFFFFF') : '#FFFFFF';
+      if (t.style.fill !== col) t.style.fill = col;
+    });
+    (['port', 'airport'] as Landmark[]).forEach((type, k) => { const [lx, ly] = LANDMARK_AT[type], [x, y] = this.toScreenI(lx, ly); this.labels[s.parishes.length + k].position.set(x, y + 18); });
+    const est = s.parishes[AGRO_HOME], [ex, ey] = this.toScreenI(est.lx, est.ly + 1.4);
+    this.labels[s.parishes.length + 2].position.set(ex, ey);
+    for (const b of this.banners) {
+      const p = player(s, b.pid); if (!p) continue;
+      const home = s.parishes[p.home], [x, y] = this.toScreenI(home.lx, home.ly + 1.4);
+      b.t.position.set(x, y);
+    }
+    void LANDMARK_PARISH; void TC_LOCAL;
   }
 }

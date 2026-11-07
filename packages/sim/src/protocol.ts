@@ -7,7 +7,7 @@ import type { Mode } from './types';
  * Online games run in lockstep: the server gathers every player's commands for a tick, applies them to its own copy,
  * steps it, and broadcasts the same commands to every phone, which does exactly the same. 10 ticks per second.
  */
-export const PROTOCOL = 4;
+export const PROTOCOL = 5;
 export const CODE_LEN = 5;
 
 /**
@@ -20,12 +20,12 @@ export interface LobbyPlayer { slot: number; name: string; color: string; connec
 export const AI_AFTER_S = 120;
 /** The caretaker acts every this many ticks (2 s). */
 export const AI_EVERY = 20;
-export interface LobbyInfo { code: string; host: number; players: LobbyPlayer[]; mode: Mode; difficulty: Difficulty; started: boolean }
+export interface LobbyInfo { code: string; host: number; players: LobbyPlayer[]; mode: Mode; difficulty: Difficulty; minutes: number; started: boolean }
 
 export type ClientMsg =
   | { t: 'create'; name: string; v: number }
   | { t: 'join'; code: string; name: string; token?: string; v: number }
-  | { t: 'settings'; mode?: Mode; difficulty?: Difficulty }
+  | { t: 'settings'; mode?: Mode; difficulty?: Difficulty; minutes?: number }
   | { t: 'start' }
   | { t: 'cmd'; c: Command }
   | { t: 'hash'; tick: number; h: string }

@@ -84,7 +84,7 @@ export class NetworkGame implements GameSession {
     this.token = store.get(`bim:token:${this.code}`) ?? '';
     this.open(() => this.raw({ t: 'join', code: this.code, name: this.name, token: this.token || undefined, v: PROTOCOL }));
   }
-  settings(m: Partial<Pick<LobbyInfo, 'mode' | 'difficulty'>>) { this.raw({ t: 'settings', ...m }); }
+  settings(m: Partial<Pick<LobbyInfo, 'mode' | 'difficulty' | 'minutes'>>) { this.raw({ t: 'settings', ...m }); }
   startGame() { this.raw({ t: 'start' }); }
   leave() {
     this.closing = true; clearTimeout(this.retryTimer); document.removeEventListener('visibilitychange', this.onVisible);

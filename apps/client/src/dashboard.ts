@@ -1,6 +1,6 @@
 import {
-  AGES, AGRO, BOAT_RATE, BT, MAX_AGE, fmtCost, DIFFICULTY, DUES, EAT, MAX_BOATS, NT, RES, STALL, TOURISM, TRAIN, airportOpen, drought, landmarkHolder, linked, owned, parishBuilt, player, popCap,
-  resourcesOnLand, rivalCost, roadNetwork, tcOf, workersOf, HOUSES, bName, buildCost, houseLevelFor, houseUpgrade,
+  AGES, AGRO, BOAT_RATE, BT, MAX_AGE, fmtCost, DIFFICULTY, DUES, EAT, MAX_DOCKS, NT, RES, STALL, TOURISM, TRAIN, airportOpen, drought, landmarkHolder, owned, parishBuilt, player, popCap,
+  resourcesOnLand, rivalCost, tcOf, workersOf, HOUSES, bName, buildCost, houseLevelFor, houseUpgrade,
   type Flow, type Res, type State,
 } from '@bim/sim';
 
@@ -120,19 +120,19 @@ export function dashboardHTML(s: State, me: string, tr: FlowTracker, isOn: (pid:
     <dl class="kv"><dt>AgroCorp holds</dt><dd>${owned(s, AGRO)} of 11</dd><dt>Its next buyout</dt><dd>${s.time < DIFFICULTY[s.difficulty].grace ? `starts saving in ${fmtT(DIFFICULTY[s.difficulty].grace - s.time)}` : Math.min(100, Math.round((s.agro.bbd / rivalCost(s)) * 100)) + '% saved'}${tgt ? ` · <strong>${tgt}</strong>` : ''}</dd></dl>
     <p class="hint">A parish with no buildings of yours can be bought out. Each one you feed pays ${n0(DUES * 60)} BBD a minute.</p></section>`;
   // ---------- port and airport
-  const roadNet = roadNetwork(s, me);
   const lm = (t: 'port' | 'airport') => {
-    const ok = linked(s, me, t, roadNet), h = landmarkHolder(s, t);
-    const who = h === me ? 'you' : h === AGRO ? 'AgroCorp' : h ? player(s, h)?.name : 'nobody';
-    return `<dt>${BT[t].name}</dt><dd>${ok ? '<span class="pill good">Connected</span>' : '<span class="pill warn">No road link</span>'}</dd><dt class="sub">Fee goes to</dt><dd class="sub">${who}</dd>`;
+    const h = landmarkHolder(s, t);
+    const who = h === me ? 'nobody (you feed it)' : h === AGRO ? 'AgroCorp' : h ? player(s, h)?.name : 'nobody';
+    return `<dt>${BT[t].name} fee goes to</dt><dd>${who}</dd>`;
   };
-  const myRoads = s.roads.reduce((a, v) => a + (v === 2 ? 1 : 0), 0);
-  const trade = `<section class="dcard"><h4>Roads and trade</h4><dl class="kv">
+  const docks = Object.values(s.buildings).filter((b) => b.owner === me && b.type === 'dock' && b.done).length;
+  const myPaths = s.roads.reduce((a, v) => a + (v === 2 + p.slot ? 1 : 0), 0);
+  const trade = `<section class="dcard"><h4>Fishing and trade</h4><dl class="kv">
       ${lm('port')}${lm('airport')}
-      <dt>Fishing boats</dt><dd>${p.boats}/${MAX_BOATS}${p.boats ? ` · +${Math.round(p.boats * BOAT_RATE * 60)} food/min` : ''}</dd>
+      <dt>Fishing docks</dt><dd>${docks}/${MAX_DOCKS}${docks ? ` · about +${Math.round(docks * BOAT_RATE * 60)} food/min` : ''}</dd>
       ${landmarkHolder(s, 'airport') === me ? `<dt>Tourism</dt><dd>${airportOpen(s) ? `+${Math.round(TOURISM * 60)} BBD/min` : 'airport closed'}</dd>` : ''}
-      <dt>Road tiles built</dt><dd>${myRoads}</dd>
-    </dl><p class="hint">Tap the port or airport on the map to trade. Your Town Centre, a Depot or a Market must connect to it by road.</p></section>`;
+      <dt>Path tiles laid</dt><dd>${myPaths}</dd>
+    </dl><p class="hint">Open the island and tap the port or airport to trade. Build a dock on your shore to fish.</p></section>`;
   // ---------- other players (online) and trade offers
   const others = s.players.filter((q) => q.id !== me);
   const incoming = s.offers.filter((o) => o.to === me), outgoing = s.offers.filter((o) => o.from === me);

@@ -16,10 +16,12 @@
       <button class="chip chip-btn res" data-pop="people" id="c-pop" aria-label="People"><i data-ic="people"></i><b id="r-pop">0</b></button>
     </div>
     <div class="row" role="group" aria-label="Game status">
+      <button class="chip chip-btn score" data-pop="score" id="c-score" aria-label="Town score"><i data-ic="star"></i><span id="s-score">0</span></button>
+      <button class="chip chip-btn" data-pop="time" id="c-time" aria-label="Time left"><i data-ic="clock"></i><span id="s-time">30:00</span></button>
       <button class="chip chip-btn" data-pop="age" id="c-age" aria-label="Your age"><i data-ic="age"></i><span id="s-age">Foraging 1/5</span></button>
       <button class="chip chip-btn" data-pop="storm" id="c-hurr" aria-label="Next hurricane"><i data-ic="storm"></i><span id="s-hurr">5:00</span></button>
       <button class="chip chip-btn dry" data-pop="drought" id="s-dry-c" hidden aria-label="Drought"><i data-ic="sun"></i><span id="s-dry">Drought</span></button>
-      <button class="chip chip-btn" data-pop="parishes" id="c-par" aria-label="Parishes"><i data-ic="parish"></i><span id="s-par">1/6</span></button>
+      <button class="chip chip-btn" data-pop="parishes" id="c-par" aria-label="Parishes"><i data-ic="parish"></i><span id="s-par">1</span></button>
       <button class="chip chip-btn agro" data-pop="agro" id="s-agro" aria-label="AgroCorp"><i data-ic="agro"></i><span id="s-agro-t">1/6</span><span class="rivalbar"><i id="s-rival"></i></span></button>
       <span class="chip" id="s-players" hidden aria-label="Players"></span>
     </div>
@@ -39,7 +41,7 @@
   <div id="bar">
     <button class="btn" id="b-build">Build</button>
     <button class="btn" id="b-dash">Dashboard</button>
-    <button class="btn" id="b-idle">Idle</button>
+    <button class="btn" id="b-island">Island</button>
     <button class="btn" id="b-all">Select all</button>
     <button class="btn" id="b-pause">Pause</button>
   </div>

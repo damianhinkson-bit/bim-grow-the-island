@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomInt } from 'node:crypto';
 import {
-  AI_AFTER_S, AI_EVERY, CODE_LEN, DIFFICULTY, DT, MAX_PLAYERS, PLAYER_COLORS, PROTOCOL, applyCommand, caretaker, createGame, restore, snapshot, stateHash, step,
+  AI_AFTER_S, AI_EVERY, CODE_LEN, DEFAULT_MINUTES, DIFFICULTY, MATCH_MINUTES, DT, MAX_PLAYERS, PLAYER_COLORS, PROTOCOL, applyCommand, caretaker, createGame, restore, snapshot, stateHash, step,
   type ClientMsg, type Command, type Difficulty, type LobbyInfo, type Mode, type RoomSave, type ServerMsg, type State,
 } from '@bim/sim';
 
@@ -25,6 +25,7 @@ export class Room {
   host = 0;
   mode: Mode = 'coop';
   difficulty: Difficulty = 'normal';
+  minutes = DEFAULT_MINUTES;
   state: State | null = null;
   private pending: [string, Command][] = [];
   private perTick = new Map<string, number>();
@@ -42,7 +43,7 @@ export class Room {
   pid(slot: number) { return `p${slot + 1}`; }
   lobby(): LobbyInfo {
     return {
-      code: this.code, host: this.host, mode: this.mode, difficulty: this.difficulty, started: this.started,
+      code: this.code, host: this.host, mode: this.mode, difficulty: this.difficulty, minutes: this.minutes, started: this.started,
       players: this.slots.map((s, k) => ({ slot: k, name: s.name, color: PLAYER_COLORS[k], connected: !!s.conn, ai: s.ai, key: s.key })),
     };
   }
@@ -85,6 +86,7 @@ export class Room {
     this.host = Number.isInteger(l.host) && l.host >= 0 && l.host < this.slots.length ? l.host : 0;
     if (l.mode === 'coop' || l.mode === 'versus') this.mode = l.mode;
     if (l.difficulty in DIFFICULTY) this.difficulty = l.difficulty;
+    if (MATCH_MINUTES.includes(l.minutes)) this.minutes = l.minutes;
     if (save.snap) {
       try { this.state = restore(JSON.parse(JSON.stringify(save.snap))); } catch { return 'That saved game is damaged.'; }
       if (!this.state?.players || this.state.players.length !== this.slots.length) { this.state = null; return 'That saved game is damaged.'; }
@@ -122,6 +124,7 @@ export class Room {
         if (this.started) return;
         if (m.mode === 'coop' || m.mode === 'versus') this.mode = m.mode;
         if (m.difficulty && m.difficulty in DIFFICULTY) this.difficulty = m.difficulty;
+        if (typeof m.minutes === 'number' && MATCH_MINUTES.includes(m.minutes)) this.minutes = m.minutes;
         this.sendLobby(); return;
       case 'start': {
         if (k !== this.host) return err('Only the host can start the game.');
@@ -129,7 +132,7 @@ export class Room {
         if (this.mode === 'versus' && this.slots.length < 2) return err('Versus needs at least 2 players.');
         const away = this.slots.filter((s) => !s.conn).map((s) => s.name);
         if (away.length) return err(`Waiting for ${away.join(' and ')} to come back to the lobby.`);
-        this.state = createGame({ seed: randomInt(1, 2 ** 31 - 1), mode: this.mode, difficulty: this.difficulty, players: this.slots.map((s) => ({ name: s.name })) });
+        this.state = createGame({ seed: randomInt(1, 2 ** 31 - 1), mode: this.mode, difficulty: this.difficulty, minutes: this.minutes, players: this.slots.map((s) => ({ name: s.name })) });
         const snap = snapshot(this.state);
         this.slots.forEach((s, j) => s.conn?.send({ t: 'start', snap, you: this.pid(j) }));
         this.sendLobby();

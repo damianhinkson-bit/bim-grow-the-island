@@ -43,10 +43,10 @@ export class LocalGame implements GameSession {
    * A game in this browser. With computer co-ops it's a race (versus): they gather, build, advance and feed parishes
    * like a player would, and AgroCorp is still after everyone's land.
    */
-  constructor(opts: { seed?: number; mode?: Mode; players?: number; difficulty?: Difficulty; bots?: number } = {}) {
+  constructor(opts: { seed?: number; mode?: Mode; players?: number; difficulty?: Difficulty; bots?: number; minutes?: number } = {}) {
     const bots = Math.max(0, Math.min(3, opts.bots ?? 0)), n = bots ? 1 + bots : opts.players ?? 1;
     this.state = createGame({
-      seed: opts.seed ?? (Date.now() % 2147483647), mode: bots ? 'versus' : opts.mode ?? 'coop', difficulty: opts.difficulty ?? 'normal',
+      seed: opts.seed ?? (Date.now() % 2147483647), mode: bots ? 'versus' : opts.mode ?? 'coop', difficulty: opts.difficulty ?? 'normal', minutes: opts.minutes,
       players: Array.from({ length: n }, (_, k) => ({ name: k === 0 ? 'You' : bots ? BOT_NAMES[k - 1] : `Player ${k + 1}` })),
     });
     this.bots = bots ? this.state.players.slice(1).map((p) => p.id) : [];

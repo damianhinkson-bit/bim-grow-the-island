@@ -1,7 +1,8 @@
-import { AGRO, H, ROADS, ROCK_A, ROCK_B, ROCK_N, RUNWAY, TOWNS, W, heightAt, inPolyF, ix, iy, makeRng, scotAt, toT, type Pt, type State } from '@bim/sim';
+import { AGRO, IH as H, IW as W, ROADS, ROCK_A, ROCK_B, ROCK_N, RUNWAY, TOWNS, heightAt, inPolyF, isx as ix, isy as iy, makeRng, scotAt, toT, type Pt, type State } from '@bim/sim';
 
-/** Pixels per tile in world space. */
-export const T = 24;
+/** Pixels per island tile in the island view. */
+export const IT = 24;
+const T = IT;
 
 function polyPath(g: CanvasRenderingContext2D, a: number[], s: number) {
   g.moveTo(a[0] * s, a[1] * s);
@@ -37,7 +38,7 @@ function smoothLine(g: CanvasRenderingContext2D, pts: Pt[], s: number) {
 
 /** Paints the island once: sea depth, reef and surf, terrain, fields, gullies, roads, airport and towns. */
 export function bakeTerrain(st: State, TS: number): HTMLCanvasElement {
-  const S = T * TS, m = st.map;
+  const S = T * TS, m = st.island;
   const c = document.createElement('canvas'); c.width = Math.round(W * S); c.height = Math.round(H * S);
   const g = c.getContext('2d')!; g.lineJoin = 'round'; g.lineCap = 'round';
   const r = makeRng(77);
@@ -181,7 +182,7 @@ function caneFields(st: State, g: CanvasRenderingContext2D, pid: number, poly: n
   g.save(); g.beginPath(); polyPath(g, poly, S); g.clip();
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const i = y * W + x;
-    if (st.map.pid[i] !== pid || !st.map.land[i] || st.roads[i]) continue;
+    if (st.island.pid[i] !== pid || !st.island.land[i] || st.island.highway[i]) continue;
     if (hash(x >> 1, y >> 1) > 0.72) continue; // fields in 2x2 blocks with a few gaps between them
     const px = x * S, py = y * S;
     g.fillStyle = 'rgba(176,196,70,.42)'; g.fillRect(px, py, S, S);

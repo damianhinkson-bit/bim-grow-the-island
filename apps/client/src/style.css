@@ -44,7 +44,7 @@ body{background:var(--sea);color:var(--fg);font-family:var(--body);-webkit-user-
 .btn.primary small{color:#4a3a05}
 .btn:disabled{opacity:.42;cursor:default}
 .btn:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
-#bar{pointer-events:auto;display:grid;grid-template-columns:.9fr 1.35fr .8fr 1.15fr .9fr;gap:6px;max-width:560px;width:100%;align-self:center}
+#bar{pointer-events:auto;display:grid;grid-template-columns:.9fr 1.35fr 1fr 1.15fr .9fr;gap:6px;max-width:560px;width:100%;align-self:center}
 #bar .btn{text-align:center;padding:10px 2px;background:var(--panel);font-size:12.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #bar .btn.on{background:var(--gold);color:var(--ink)}
 .tag{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;padding:2px 7px;border-radius:999px;margin-right:4px}
@@ -86,7 +86,7 @@ body{background:var(--sea);color:var(--fg);font-family:var(--body);-webkit-user-
 .dcard h4{margin:0 0 8px;font-size:12px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .big{font-family:var(--display);font-size:34px;line-height:1;color:var(--fg);margin-bottom:8px;font-variant-numeric:tabular-nums}
 .big span{font-family:var(--body);font-size:13px;color:var(--muted);margin-left:6px;font-weight:600}
-.kv{display:grid;grid-template-columns:1fr auto;gap:5px 12px;margin:0 0 4px;font-size:13.5px}
+.kv{display:grid;grid-template-columns:minmax(min-content,max-content) minmax(0,1fr);gap:5px 12px;margin:0 0 4px;font-size:13.5px}
 .kv dt{color:var(--muted);min-width:0}.kv dd{margin:0;text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
 .pos{color:var(--leaf)}.neg{color:#FF9C8A}
 .pill{display:inline-block;font-size:10.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;padding:2px 7px;border-radius:999px}
@@ -337,3 +337,23 @@ button.pdot::before{content:'';position:absolute;inset:-8px -4px}
 .bpic-sm{width:110px;flex:none;aspect-ratio:176/96;border-radius:8px}
 .nextlook p{margin:0;font-size:12.5px;line-height:1.35;color:var(--muted)}
 .nextlook strong{color:var(--fg)}
+
+/* ---------- town builder: Build menu tabs, score chip, leaderboards */
+.tabs{display:flex;gap:4px;margin:2px 0 6px;padding:3px;border-radius:12px;background:rgba(255,255,255,.06)}
+.tab{flex:1;min-height:36px;border:0;border-radius:9px;background:transparent;color:var(--muted);font:600 14px var(--body);cursor:pointer}
+.tab.on{background:var(--gold);color:var(--ink)}
+.tab:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.chip.score,.chip-btn.score{color:var(--gold);font-weight:700}
+#bar .btn#b-island.on{background:var(--gold);color:var(--ink)}
+.board{list-style:none;margin:10px 0;padding:0;display:flex;flex-direction:column;gap:4px;text-align:left}
+.board li{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:10px;background:rgba(255,255,255,.06)}
+.board li.me{background:rgba(255,199,38,.16);outline:1px solid var(--line)}
+.board .rank{width:18px;font-weight:700;color:var(--muted)}
+.board .ndot{width:12px;height:12px;border-radius:50%;flex:none;border:1px solid rgba(0,0,0,.4)}
+.board .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.board strong{color:var(--gold)}
+.board.mini{margin:6px 0}.board.mini li{padding:4px 8px}
+.breakdown{list-style:none;margin:8px 0 14px;padding:0;text-align:left;font-size:14px}
+.breakdown li{display:flex;justify-content:space-between;padding:3px 2px;border-bottom:1px solid rgba(255,255,255,.08)}
+.breakdown li.tot{border:0;padding-top:7px;font-size:16px}.breakdown li.tot strong{color:var(--gold)}
+.pop-flow.score dt small{display:block;color:var(--muted);font-weight:400;font-size:11.5px}

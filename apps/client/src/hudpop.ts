@@ -1,10 +1,10 @@
 import {
   AGES, AGRO, DIFFICULTY, DUES, EAT, HOUSES, MAX_AGE, STALL, drought, fmtCost, houseLevelFor, owned, player, popCap, rivalPrice, tcOf,
-  teamOwned, winTarget, workersOf, type Player, type Res, type State,
+  SCORE, SCORE_BBD_PER, SCORE_FOOD_PER, STAND_COST, townScore, workersOf, type Player, type Res, type State,
 } from '@bim/sim';
 import { ICON, type IconName } from './icons';
 
-export type PopKind = 'food' | 'water' | 'stone' | 'people' | 'bbd' | 'age' | 'storm' | 'drought' | 'parishes' | 'agro';
+export type PopKind = 'food' | 'water' | 'stone' | 'people' | 'bbd' | 'age' | 'storm' | 'drought' | 'parishes' | 'agro' | 'score' | 'time';
 export interface PopCtx {
   s: State; me: Player;
   rates: { gain: Record<Res, number>; upkeep: Record<Res, number>; spent: Record<Res, number>; eaten: number } | null;
@@ -58,7 +58,7 @@ export function popContent(kind: PopKind, { s, me, rates }: PopCtx): string {
         `<p>Your workers, and how many you have room for. Each one eats ${EAT * 60} food a minute.</p>` +
         `<dl class="kv"><dt>Workers</dt><dd>${ws.length}</dd><dt>Room in your homes</dt><dd>${cap}</dd><dt>Idle right now</dt><dd>${ws.filter((w) => !w.task).length}</dd></dl>` +
         (full ? `<p class="pop-warn">You're full. Build a ${h.name} (room for ${h.pop}) or upgrade a house.</p>` : `<p class="pop-hint">Train a worker at your Town Centre for 50 food.</p>`) +
-        `<div class="btns">${tc ? btn('train', 'Train a worker · 50 food', { primary: !full, disabled: r.food < 50 || full }) : ''}${btn('place:house', `Build a ${h.name}`, { primary: full })}</div>`;
+        `<div class="btns">${tc ? btn('train', 'Train a worker · 50 food', { primary: !full, disabled: r.food < 50 || full }) : ''}${btn('place:house', `Build a ${h.name}`, { primary: full })}${btn('idle', 'Find an idle worker', { disabled: !ws.some((w) => !w.task) })}</div>`;
     }
     case 'bbd': {
       const n = owned(s, me.id), dues = DUES * n * 60, gain = rates?.gain.bbd ?? dues, spent = (rates?.upkeep.bbd ?? 0) + (rates?.spent.bbd ?? 0);
@@ -74,23 +74,39 @@ export function popContent(kind: PopKind, { s, me, rates }: PopCtx): string {
       const next = AGES[me.age];
       const status = me.ageT >= 0 && next ? `<p class="pop-hint">Advancing now: ready in ${Math.ceil(next.time - me.ageT)}s.</p>` : '';
       return head('age', AGES[me.age - 1].name, `${me.age} of ${MAX_AGE}`) +
-        `<p>Five ages, from foraging to the Co-op Age. Each one unlocks new buildings and better houses. You must reach the Co-op Age to win.</p>` +
+        `<p>Five ages, from foraging to the Co-op Age. Each one unlocks new buildings and better houses. Every age adds ★ ${SCORE.age} to your town score.</p>` +
         (next ? `<dl class="kv"><dt>Next</dt><dd>${next.name}</dd><dt>Costs</dt><dd>${fmtCost(next.cost)}</dd><dt>Unlocks</dt><dd>${next.unlocks}</dd></dl>${status}<div class="btns">${btn('age', `Advance to ${next.short} Age`, { primary: true, disabled: me.ageT >= 0 })}</div>` : '<p class="pop-hint">You\'ve reached the final age.</p>');
     }
     case 'storm': {
       const left = s.weather.nextHurr - s.time;
       return head('storm', 'Hurricane', s.weather.stormT > 0 ? 'Now!' : `in ${fmtT(left)}`) +
-        `<p>Hurricanes knock down or damage buildings, strip breadfruit trees and sink fishing boats. AgroCorp loses money too.</p>` +
+        `<p>Hurricanes knock down or damage buildings, strip breadfruit trees, keep fishing docks in harbour and blow away some of your decorations. AgroCorp loses money too.</p>` +
         `<p class="pop-hint">Protect your co-op: a seawall shields buildings near the coast, a windbreak shields them inland, and coral stone houses or better stand up on their own.</p>`;
     }
     case 'drought':
       return head('sun', 'Drought', fmtT(s.weather.droughtUntil - s.time)) +
         `<p>No rain: cisterns stop filling and springs slow down. Farms and aquaponics still use water.</p><p class="pop-hint">Keep a stock of water before one hits.</p>`;
     case 'parishes': {
-      const mine = s.mode === 'coop' ? teamOwned(s, me.team) : owned(s, me.id), target = winTarget(s);
-      return head('parish', 'Parishes fed', `${mine} of ${target}`) +
-        `<p>Win by feeding <strong>${target} of the 11 parishes</strong> and reaching the <strong>Co-op Age</strong>.</p>` +
-        `<p class="pop-hint">Tap a parish next to yours to feed it. Then put a building in it, so AgroCorp${s.players.length > 1 ? ' and rivals' : ''} can't take it.</p>`;
+      const mine = owned(s, me.id);
+      return head('parish', 'Parishes fed', `${mine} of 11`) +
+        `<p>Each parish you feed adds <strong>★ ${SCORE.parish}</strong> to your town score and pays ${DUES * 60} BBD a minute in co-op dues.</p>` +
+        `<p class="pop-hint">Open the island and tap a parish next to yours to feed it. Then put up a co-op stand (${fmtCost(STAND_COST)}) so AgroCorp${s.players.length > 1 ? ' and rivals' : ''} can't take it.</p>` +
+        `<div class="btns">${btn('island', 'Open the island', { primary: true })}</div>`;
+    }
+    case 'score': {
+      const sc = townScore(s, me.id);
+      const row = (k: string, v: number, how: string) => `<dt>${k}<small>${how}</small></dt><dd>${n0(v)}</dd>`;
+      const board = s.players.length > 1 ? `<ol class="board mini">${s.players.map((p) => ({ p, t: townScore(s, p.id).total })).sort((a, b) => b.t - a.t).map(({ p, t }, k) => `<li${p.id === me.id ? ' class="me"' : ''}><span class="rank">${k + 1}</span><i class="ndot" style="background:${p.color}"></i><span class="nm">${p.id === me.id ? 'You' : p.name}</span><strong>${n0(t)}</strong></li>`).join('')}</ol>` : '';
+      return head('star', 'Town score', `★ ${n0(sc.total)}`) +
+        `<p>When time runs out, the best town on the island wins.</p>${board}` +
+        `<dl class="kv pop-flow score">${row('Homes', sc.people, `${SCORE.people} a person housed`)}${row('Food grown', sc.food, `1 per ${SCORE_FOOD_PER} food`)}${row('Money earned', sc.bbd, `1 per ${SCORE_BBD_PER} BBD`)}${row('Good looks', sc.beauty, 'decorations, better houses, paths, trees')}${row('Hurricane-proof', sc.safe, `${SCORE.safe} a sheltered building`)}${row('Ages', sc.age, `${SCORE.age} an age`)}${row('Parishes fed', sc.parish, `${SCORE.parish} a parish`)}</dl>` +
+        `<p class="pop-hint">Quickest gains: decorations (Build → Decorations), better houses, and feeding parishes.</p>`;
+    }
+    case 'time': {
+      const left = s.endsAt - s.time;
+      return head('clock', 'Time left', fmtT(left)) +
+        `<p>The match lasts ${Math.round(s.endsAt / 60)} minutes. When the clock hits zero, the co-op with the highest town score wins.</p>` +
+        `<p class="pop-hint">If AgroCorp buys 6 parishes before then, everyone loses.</p>`;
     }
     case 'agro': {
       const ag = s.agro, d = DIFFICULTY[s.difficulty];
@@ -104,8 +120,8 @@ export function popContent(kind: PopKind, { s, me, rates }: PopCtx): string {
       return head('agro', 'AgroCorp', `${owned(s, AGRO)} of 6`) +
         `<p>A big agribusiness buying up the island for cane. If it owns 6 parishes, everyone loses.</p>` +
         `<dl class="kv"><dt>Now</dt><dd>${now}</dd></dl>` +
-        `<p class="pop-hint">Stop it: feed parishes before it buys them, and keep a building in each of yours. It can't buy a parish with your building in it.</p>` +
-        `<div class="btns">${btn('pop-agro', 'Show me on the map', { primary: true })}</div>`;
+        `<p class="pop-hint">Stop it: feed parishes before it buys them, and put a co-op stand in each of yours. It can't buy a parish with your stand in it.</p>` +
+        `<div class="btns">${btn('pop-agro', 'Show me on the island', { primary: true })}${btn('pop-estate', 'Visit its estate')}</div>`;
     }
   }
 }

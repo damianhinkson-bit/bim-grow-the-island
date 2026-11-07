@@ -32,16 +32,14 @@ async function boot() {
   }
   const centerHome = () => {
     const me = game.state.players.find((p) => p.id === game.me) ?? game.state.players[0];
-    const home = game.state.parishes[me.home];
-    r.z = Math.max(0.9, Math.min(1.5, r.vw / (13 * 24)));
-    r.centerOn(home.lx, home.ly);
+    r.goHome(me.id);
   };
   const play = (g: GameSession) => { game = g; r.setGame(g); ui.setGame(g); centerHome(); menu.hide(); ui.start(); };
   const leaveNet = () => { net?.leave(); net = null; };
 
   const ui = new UI(game, r, () => { ui.stop(); leaveNet(); menu.home(); });
   const menu = new Menu({
-    solo: (difficulty: Difficulty, bots: number) => { leaveNet(); play(new LocalGame({ players: 1, difficulty, bots })); },
+    solo: (difficulty: Difficulty, bots: number, minutes: number) => { leaveNet(); play(new LocalGame({ players: 1, difficulty, bots, minutes })); },
     create: (name) => { leaveNet(); net = new NetworkGame(handlers(), name); net.create(); },
     join: (name, code) => { leaveNet(); net = new NetworkGame(handlers(), name); net.join(code); },
     settings: (m) => net?.settings(m),

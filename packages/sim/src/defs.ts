@@ -89,7 +89,7 @@ export const RUNOFF_FISH = 0.1, FISH_FLOOR = 0.6;
 /** A co-op stand in a parish you feed stops AgroCorp and rivals taking it. */
 export const STAND_COST: Cost = { stone: 60, bbd: 30 };
 /** Match lengths the host can pick, in minutes. */
-export const MATCH_MINUTES = [20, 30, 45] as const;
+export const MATCH_MINUTES: readonly number[] = [20, 30, 45];
 export const DEFAULT_MINUTES = 30;
 /**
  * Town score: what each thing is worth. Shown to players as a breakdown, so keep the reasons simple.
