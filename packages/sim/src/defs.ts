@@ -16,7 +16,7 @@ export const NT: Record<NodeType, { label: string; res: Res; rate: number; max: 
   spring: { label: 'Spring', res: 'water', rate: 1, max: Number.POSITIVE_INFINITY },
 };
 
-export type BType = 'tc' | 'house' | 'farm' | 'depot' | 'cistern' | 'seawall' | 'market' | 'composter' | 'windbreak' | 'aqua' | 'solar' | 'hub' | 'hq' | 'port' | 'airport';
+export type BType = 'tc' | 'house' | 'farm' | 'depot' | 'cistern' | 'seawall' | 'market' | 'composter' | 'windbreak' | 'aqua' | 'solar' | 'hub' | 'hq' | 'port' | 'airport' | 'ffarm' | 'mill' | 'tower';
 /**
  * Houses come in five kinds, one per age. A new house is built as the kind of your current age; older houses can be
  * upgraded one step at a time, each paid for. wind: 0 blows down easily, 1 handles high winds (half the hurricane
@@ -48,6 +48,10 @@ export const BT: Record<BType, BDef> = {
   windbreak: { name: 'Windbreak', w: 1, h: 1, age: 3, cost: { stone: 20, food: 30 }, hp: 250, build: 12, desc: 'A row of trees and bamboo. Shields buildings within 3 tiles from hurricanes, anywhere inland.' },
   hub: { name: 'Co-op Hub', w: 1, h: 1, age: 5, cost: { stone: 150, bbd: 150 }, hp: 500, drop: true, build: 24, desc: 'The co-op\'s distribution centre. Takes drop-offs and raises your co-op dues by half.' },
   hq: { name: 'AgroCorp HQ', w: 2, h: 2, cost: {}, hp: 9999, build: 1, desc: '' },
+  // AgroCorp's own buildings: it puts them up on land it has bought (players can't build these). build: seconds to finish.
+  ffarm: { name: 'Factory Farm', w: 2, h: 2, cost: {}, hp: 500, build: 45, desc: 'Long sheds of caged chickens and penned pigs, fed on imported grain. The runoff makes farm plots nearby grow a quarter less.' },
+  mill: { name: 'Cane Mill', w: 2, h: 2, cost: {}, hp: 600, build: 40, desc: "Crushes AgroCorp's cane for export sugar and molasses." },
+  tower: { name: 'Agro Towers', w: 2, h: 2, cost: {}, hp: 700, build: 60, desc: "Company apartments for AgroCorp's managers. The rent pays for more land." },
   port: { name: 'Bridgetown Port', w: 2, h: 2, cost: {}, hp: 9999, build: 1, landmark: true, desc: 'Ships export your surplus and bring in supplies. Fishing boats sail from here.' },
   airport: { name: 'Grantley Adams Airport', w: 2, h: 2, cost: {}, hp: 9999, build: 1, landmark: true, desc: 'Air freight pays top prices for fresh food. Tourists bring income to whoever holds Christ Church.' },
 };
@@ -56,6 +60,16 @@ export const BUILD_LIST: BType[] = ['house', 'depot', 'farm', 'cistern', 'market
  * The five ages. cost/time are what it takes to advance INTO that age (age 1 is where everyone starts).
  * Reaching the Co-op Age is required to win.
  */
+/** AgroCorp's buildings, in the order it puts them up, one per parish it owns (two in its home parish). */
+export const AGRO_BUILDS: BType[] = ['ffarm', 'mill', 'tower'];
+/** Seconds between AgroCorp starting new buildings. */
+export const AGRO_BUILD_EVERY = 50;
+/** Each finished AgroCorp building adds this share to its income. */
+export const AGRO_BUILD_BOOST = 0.04;
+/** Factory farm runoff: player farm plots within this many tiles grow at this rate. */
+export const RUNOFF_R = 4;
+export const RUNOFF = 0.75;
+
 export const AGES: { name: string; short: string; cost: Cost; time: number; unlocks: string }[] = [
   { name: 'Foraging Age', short: 'Foraging', cost: {}, time: 0, unlocks: 'Gathering, huts and depots.' },
   { name: 'Rain-fed Farming Age', short: 'Farming', cost: { food: 150, stone: 50 }, time: 20, unlocks: 'Chattel houses, farm plots, cisterns, the market and seawalls.' },

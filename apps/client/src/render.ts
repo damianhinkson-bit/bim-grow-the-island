@@ -40,6 +40,7 @@ export class Renderer {
   /** AgroCorp's trucks: only for show, worked out from the game state, so every phone draws the same thing. */
   private agroL = new Container();
   private trucks: Sprite[] = [];
+  private agroCrew: Sprite[] = [];
   private routes: { key: string; list: { pts: number[]; kind: TruckKind; offset: number }[] } = { key: '', list: [] };
   private above = new Graphics();
   private fx = new Graphics();
@@ -149,6 +150,7 @@ export class Renderer {
     this.syncBuildings(s);
     this.syncWorkers(game, view);
     this.drawTrucks(s, game.alpha);
+    this.drawCrew(s, game.alpha);
     this.drawAbove(s, view, game);
     this.drawLabels(s);
     this.drawFx(s);
@@ -223,6 +225,42 @@ export class Renderer {
       const dx = (bx - ax) * moving, size = 26 / sp.texture.width;
       const dir = dx ? Math.sign(dx) : Math.sign(sp.scale.x) || 1;
       sp.scale.set(dir * size, size);
+    });
+  }
+
+  /**
+   * AgroCorp's workers, in red: on a building site they work round the frame; at a finished factory farm, mill or
+   * towers they walk out to the fields and back; a few come and go at HQ. Worked out from the game state and clock.
+   */
+  private drawCrew(s: State, alpha: number) {
+    const t = s.time + alpha * DT, spots: { x: number; y: number; flip: boolean }[] = [];
+    for (const b of Object.values(s.buildings)) {
+      if (b.owner !== AGRO) continue;
+      const cx = b.x + 1, cy = b.y + 1, crew = b.type === 'hq' ? 2 : b.done ? 2 : 3;
+      for (let k = 0; k < crew; k++) {
+        const seed = b.id * 7 + k * 13, ph = t * (b.done ? 0.12 : 0.22) + seed * 0.37;
+        let x: number, y: number, flip: boolean;
+        if (!b.done) {
+          // round the site's edge
+          const a = ph * Math.PI * 2; x = cx + Math.cos(a) * 1.35; y = cy + 0.4 + Math.sin(a) * 1.1; flip = Math.sin(a) > 0;
+        } else {
+          // out to a spot a few tiles away and back again
+          const ang = (seed % 360) * Math.PI / 180, far = 2.2 + (seed % 3) * 0.6;
+          const u = ph % 1, d = u < 0.5 ? u * 2 : 2 - u * 2;
+          x = cx + Math.cos(ang) * far * d; y = cy + 0.9 + Math.sin(ang) * far * d * 0.8;
+          flip = (Math.cos(ang) < 0) !== (u >= 0.5);
+        }
+        const i = Math.round(x) + Math.round(y) * W;
+        if (x < 0 || y < 0 || x >= W || y >= H || !s.map.land[i]) continue;
+        spots.push({ x, y, flip });
+      }
+    }
+    while (this.agroCrew.length < spots.length) { const sp = new Sprite(workerTex('#E2553F', 4)); sp.anchor.set(0.5, 0.9); this.agroL.addChild(sp); this.agroCrew.push(sp); }
+    this.agroCrew.forEach((sp, k) => {
+      const p = spots[k]; sp.visible = !!p; if (!p) return;
+      // the same size as a co-op's workers (16x20)
+      const size = 16 / sp.texture.width;
+      sp.position.set(p.x * T, p.y * T); sp.zIndex = sp.y; sp.scale.set(p.flip ? -size : size, size);
     });
   }
 

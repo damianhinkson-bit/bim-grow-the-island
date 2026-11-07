@@ -42,7 +42,11 @@ export interface Flow { gain: Record<Res, number>; upkeep: Record<Res, number>; 
 
 export interface Parish { id: number; name: string; poly: number[]; owner: string | null; tiles: number[]; adj: number[]; lx: number; ly: number }
 
-export interface GameEvent { seq: number; t: number; kind: 'info' | 'warn' | 'bad' | 'good'; msg: string; to?: string }
+/**
+ * Something that happened. `to`: only that player sees it. `news`: a public headline about what someone else did,
+ * with `who` (a player id or 'agro') and `at` (a tile to jump to).
+ */
+export interface GameEvent { seq: number; t: number; kind: 'info' | 'warn' | 'bad' | 'good'; msg: string; to?: string; news?: boolean; who?: string; at?: { x: number; y: number } }
 
 export type Mode = 'coop' | 'versus';
 
@@ -66,7 +70,7 @@ export interface State {
   players: Player[];
   difficulty: Difficulty;
   /** target: the parish AgroCorp is saving up to buy; warned: whether that has been announced. */
-  agro: { bbd: number; target: number | null; warned: boolean };
+  agro: { bbd: number; target: number | null; warned: boolean; nextBuild: number };
   weather: { nextHurr: number; hurrWarned: boolean; nextDrought: number; droughtUntil: number; nextPest: number; stormT: number; hurrIdx: number };
   events: GameEvent[]; eventSeq: number;
   offers: Offer[];

@@ -2,7 +2,7 @@ import {
   AGES, AGRO, AGRO_HOME, DIFFICULTY, MAX_AGE, BOAT_COST, BOAT_RATE, BT, BUILD_LIST, DEALS, DUES, MAX_BOATS, NT, RELIEF, ROAD_COST, STALL, TOURISM, TRAIN, W,
   airportOpen, aquaPowered, canAfford, claimBlock, claimCost, dealTerms, drought, fmtCost, landmarkHolder, linked, owned,
   parishBuilt, player, popCap, protectedB, rivalCost, rivalPrice, tcOf, HOUSES, bName, buildCost, houseLevelFor, houseUpgrade, teamOwned, winTarget, workersOf,
-  type BType, type Command, type DealId, type Landmark, type Res, type State, type Worker,
+  type BType, type GameEvent, type Command, type DealId, type Landmark, type Res, type State, type Worker,
 } from '@bim/sim';
 import { FlowTracker, dashboardHTML } from './dashboard';
 import { infoCard } from './info';
@@ -15,6 +15,8 @@ import { T } from './terrain';
 
 const $ = <E extends HTMLElement = HTMLElement>(s: string) => document.querySelector(s) as E;
 const fmtT = (sec: number) => { const s = Math.max(0, Math.ceil(sec)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+const escHTML = (t: string) => t.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
 export class UI {
   /** Whether a finger is down inside this element (without :has(), which older iPhones don't support). */
@@ -43,7 +45,7 @@ export class UI {
   constructor(private game: GameSession, private r: Renderer, private onEnd: () => void) {
     this.bindPanel(); this.bindBar(); this.bindInput(); this.bindKeys(); this.bindDash();
   }
-  setGame(game: GameSession) { this.seenAge = 1; this.storyShown = false; this.flows.reset(); this.closeDash(); this.game = game; this.view = { sel: null, buildMode: null, marks: [], roadMode: false, roadDraft: new Set() }; this.menu = null; this.lastPanel = ''; this.hudCache = {}; this.lastAgroTarget = game.state.agro.target; this.closePop(); this.moneyLast = -1; }
+  setGame(game: GameSession) { this.seenAge = 1; this.storyShown = false; this.flows.reset(); this.closeDash(); this.game = game; this.view = { sel: null, buildMode: null, marks: [], roadMode: false, roadDraft: new Set() }; this.menu = null; this.lastPanel = ''; this.hudCache = {}; this.lastAgroTarget = game.state.agro.target; this.closePop(); this.moneyLast = -1; this.newsQueue = []; }
 
   private get s(): State { return this.game.state; }
   private get me() { return player(this.s, this.game.me)!; }
@@ -64,7 +66,12 @@ export class UI {
   tick(dt: number) {
     for (const m of this.view.marks) m.t -= dt;
     this.view.marks = this.view.marks.filter((m) => m.t > 0);
-    for (const e of this.game.newEvents()) this.toast(e.msg, e.kind === 'info' ? undefined : e.kind);
+    for (const e of this.game.newEvents()) {
+      if (!e.news) { this.toast(e.msg, e.kind === 'info' ? undefined : e.kind); continue; }
+      if (e.who === this.game.me) continue; // you already got your own message about it
+      this.newsQueue.push(e); if (this.newsQueue.length > 3) this.newsQueue.shift(); // keep the latest few
+    }
+    if (this.newsQueue.length && performance.now() / 1000 - this.newsAt >= 3.5) this.newsToast(this.newsQueue.shift()!);
     this.hud();
     if (this.me.age > this.seenAge) { this.seenAge = this.me.age; this.ageUp(); }
     if (this.bannerT > 0) { this.bannerT -= dt; if (this.bannerT <= 0) $('#ageBanner').hidden = true; }
@@ -633,6 +640,24 @@ export class UI {
     g.strokeStyle = '#FFFFFF'; g.lineWidth = 1; g.strokeRect(ox + r.cam.x * sc, oy + r.cam.y * sc, (r.vw / r.z) * sc, (r.vh / r.z) * sc);
     return { s: sc, ox, oy };
   }
+  /**
+   * A headline about what another co-op or AgroCorp did: their colour, the news, and a tap takes you there.
+   * At most one every few seconds, so a busy moment doesn't bury your own messages; the rest wait in the dashboard.
+   */
+  private newsAt = -99;
+  private newsQueue: GameEvent[] = [];
+  private newsToast(e: GameEvent) {
+    this.newsAt = performance.now() / 1000;
+    const who = e.who === AGRO ? { color: '#E2553F', name: 'AgroCorp' } : player(this.s, e.who!) ?? { color: '#fff', name: '' };
+    const box = $('#toasts'), el = document.createElement('button');
+    el.className = 'toast news ' + (e.kind === 'info' ? '' : e.kind);
+    el.innerHTML = `<i class="ndot" style="background:${who.color}"></i><span>${escHTML(e.msg)}</span><span class="ngo">${ICON.locate}</span>`;
+    el.setAttribute('aria-label', `${e.msg} Tap to see it on the map.`);
+    el.onclick = () => { if (e.at) { this.r.centerOn(e.at.x, e.at.y); this.mark(e.at.x, e.at.y); } el.remove(); };
+    box.appendChild(el);
+    while (box.children.length > 3) box.firstChild!.remove();
+    setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 320); }, 6000);
+  }
   toast(msg: string, kind?: string) {
     const box = $('#toasts'), el = document.createElement('div');
     el.className = 'toast' + (kind ? ' ' + kind : ''); el.textContent = msg; box.appendChild(el);
@@ -657,6 +682,7 @@ export class UI {
       if (a.startsWith('answer:')) { const [, id, yes] = a.split(':'); this.send({ type: 'answer', offer: Number(id), accept: yes === '1' }); }
       if (a === 'dash-train') { const tc = tcOf(this.s, this.game.me); if (tc) this.send({ type: 'train', building: tc.id }); }
       else if (a === 'dash-idle') this.idleToFood();
+      else if (a.startsWith('goto:')) { const [x, y] = a.slice(5).split(',').map(Number); this.closeDash(); this.r.centerOn(x, y); this.mark(x, y); return; }
       else if (a === 'stall-food') this.send({ type: 'market', trade: 'stall-food' });
       this.renderDash(true);
     };

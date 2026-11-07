@@ -164,9 +164,73 @@ function drawDepot(g: CanvasRenderingContext2D, age: number) {
   if (age >= 5) { g.fillStyle = '#3FA7D6'; g.fillRect(1, 16, 9, 5); g.fillStyle = '#F4F1E8'; g.fillRect(6, 14, 4, 3); g.fillStyle = '#222'; circle(g, 3, 21, 1.3); circle(g, 8, 21, 1.3); }
 }
 
+/** Buildings that take 2x2 tiles. */
+const BIG = new Set<BType>(['tc', 'hq', 'port', 'airport', 'ffarm', 'mill', 'tower']);
+/** AgroCorp's own buildings. */
+const AGRO_B = new Set<BType>(['ffarm', 'mill', 'tower']);
+const RED = '#E2553F';
+
+/** Long sheds with corrugated roofs, a feed silo and a muddy pen: industrial livestock. */
+function drawFactoryFarm(g: CanvasRenderingContext2D) {
+  g.fillStyle = '#7A6448'; g.fillRect(2, 30, 44, 15);                                      // muddy pen
+  g.strokeStyle = '#C9C2B0'; g.lineWidth = 1; g.strokeRect(2.5, 30.5, 43, 14);
+  for (let k = 0; k < 9; k++) { g.beginPath(); g.moveTo(3 + k * 5, 30.5); g.lineTo(3 + k * 5, 44.5); g.stroke(); }
+  g.fillStyle = '#F2E8D8'; for (const [x, y] of [[8, 38], [14, 41], [22, 37], [30, 40], [37, 38]]) ellipse(g, x, y, 2, 1.3); // animals
+  for (const y0 of [4, 16]) {                                                              // two long sheds
+    g.fillStyle = '#B9BEC6'; g.fillRect(2, y0 + 4, 34, 8);
+    g.fillStyle = '#8D949E'; g.beginPath(); g.moveTo(1, y0 + 5); g.lineTo(5, y0); g.lineTo(33, y0); g.lineTo(37, y0 + 5); g.closePath(); g.fill();
+    g.strokeStyle = 'rgba(0,0,0,.18)'; g.lineWidth = 0.7; for (let k = 0; k < 9; k++) { g.beginPath(); g.moveTo(6 + k * 3.4, y0 + 0.5); g.lineTo(4 + k * 3.6, y0 + 4.6); g.stroke(); }
+    g.fillStyle = '#5B6370'; for (let k = 0; k < 6; k++) g.fillRect(4 + k * 5.4, y0 + 7, 3, 2);
+    g.fillStyle = RED; g.fillRect(2, y0 + 10.5, 34, 1.4);
+  }
+  g.fillStyle = '#D7DCE2'; g.fillRect(39, 6, 7, 22); g.fillStyle = '#AEB5BF'; g.fillRect(43, 6, 3, 22); // silo
+  g.fillStyle = '#9AA1AB'; g.beginPath(); g.ellipse(42.5, 6, 3.5, 1.8, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = RED; g.fillRect(39, 14, 7, 2);
+}
+/** Brick mill with a smoking stack, a heap of cut cane and a molasses tank. */
+function drawMill(g: CanvasRenderingContext2D) {
+  g.fillStyle = '#9BBF3A'; g.beginPath(); g.ellipse(11, 38, 10, 6, 0, 0, Math.PI * 2); g.fill();   // cane heap
+  g.strokeStyle = '#5E8A22'; g.lineWidth = 0.7; for (let k = 0; k < 7; k++) { g.beginPath(); g.moveTo(3 + k * 2.6, 40); g.lineTo(6 + k * 2.4, 33); g.stroke(); }
+  g.fillStyle = '#A4553A'; g.fillRect(14, 12, 26, 22);                                       // brick hall
+  g.strokeStyle = 'rgba(60,20,10,.35)'; g.lineWidth = 0.5; for (let r = 0; r < 7; r++) { g.beginPath(); g.moveTo(14, 15 + r * 3); g.lineTo(40, 15 + r * 3); g.stroke(); }
+  g.fillStyle = '#5A606B'; g.beginPath(); g.moveTo(12, 13); g.lineTo(27, 5); g.lineTo(42, 13); g.closePath(); g.fill();
+  g.fillStyle = '#2E2A28'; for (const x of [18, 25, 32]) g.fillRect(x, 19, 4, 6);
+  g.fillStyle = RED; g.fillRect(14, 28, 26, 2.2);
+  g.fillStyle = '#6E3626'; g.fillRect(36, 0, 5, 14);                                         // smokestack
+  g.fillStyle = 'rgba(80,80,90,.45)'; for (const [x, y, r] of [[40, 0, 3], [44, 1.5, 2.4]]) { g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill(); }
+  g.fillStyle = '#3B2414'; g.fillRect(36, 34, 10, 10); g.fillStyle = '#5A3A22'; g.beginPath(); g.ellipse(41, 34, 5, 1.8, 0, 0, Math.PI * 2); g.fill(); // molasses tank
+  g.strokeStyle = '#7D848F'; g.lineWidth = 1.6; g.beginPath(); g.moveTo(18, 36); g.lineTo(24, 30); g.stroke();                // conveyor
+}
+/** Two glassy company tower blocks with AgroCorp's red band. */
+function drawTowers(g: CanvasRenderingContext2D) {
+  const tower = (x: number, top: number, w: number) => {
+    g.fillStyle = '#D9DEE6'; g.fillRect(x, top, w, 44 - top);
+    g.fillStyle = '#B8C0CC'; g.fillRect(x + w - 3, top, 3, 44 - top);
+    g.fillStyle = '#4C7BA8'; for (let y = top + 4; y < 40; y += 4) for (let c = 0; c < Math.floor((w - 4) / 3.4); c++) g.fillRect(x + 2 + c * 3.4, y, 2.2, 2.4);
+    g.fillStyle = RED; g.fillRect(x, top, w, 2.5); g.fillRect(x, top + 10, w, 1.4);
+  };
+  tower(4, 4, 18); tower(25, 12, 18);
+  g.fillStyle = '#5B6370'; g.fillRect(2, 43, 44, 3);
+  g.fillStyle = '#FFFFFF'; g.font = 'bold 6px sans-serif'; g.fillText('AC', 9, 9.6);
+}
+/** An AgroCorp building site: a concrete pad, steel frame and a tower crane. */
+function drawAgroSite(g: CanvasRenderingContext2D, t: BType) {
+  g.fillStyle = '#A9A49A'; g.fillRect(3, 14, 42, 31);
+  g.strokeStyle = '#6B7380'; g.lineWidth = 1.2;
+  const top = t === 'tower' ? 10 : 22;
+  for (const x of [8, 18, 28, 38]) { g.beginPath(); g.moveTo(x, 44); g.lineTo(x, top); g.stroke(); }
+  for (let y = 44; y > top; y -= 7) { g.beginPath(); g.moveTo(8, y); g.lineTo(38, y); g.stroke(); }
+  g.strokeStyle = '#FFB000'; g.lineWidth = 1.6; g.beginPath(); g.moveTo(43, 44); g.lineTo(43, 2); g.lineTo(14, 2); g.stroke(); // crane
+  g.beginPath(); g.moveTo(43, 2); g.lineTo(47, 2); g.stroke();
+  g.strokeStyle = '#333'; g.lineWidth = 0.6; g.beginPath(); g.moveTo(22, 2); g.lineTo(22, 12); g.stroke();
+  g.fillStyle = '#8A5A33'; g.fillRect(19.5, 12, 5, 3);
+  g.fillStyle = '#FFE14D'; g.fillRect(3, 44, 42, 2); g.fillStyle = '#222'; for (let k = 0; k < 7; k++) g.fillRect(4 + k * 6, 44, 3, 2); // hazard tape
+  g.fillStyle = RED; g.fillRect(4, 16, 9, 6); g.fillStyle = '#fff'; g.font = 'bold 4px sans-serif'; g.fillText('AGRO', 4.6, 20.5);
+}
+
 function drawBuilding(g: CanvasRenderingContext2D, type: BType, variant: number, opts: { dry?: boolean; age?: number } = {}) {
   const age = opts.age ?? 3;
-  const x = 0, y = 0, w = type === 'tc' || type === 'hq' || type === 'port' || type === 'airport' ? 2 * T : T, h = w;
+  const x = 0, y = 0, w = BIG.has(type) ? 2 * T : T, h = w;
   g.fillStyle = 'rgba(0,0,0,.22)'; g.fillRect(x + 3, y + h - 5, w - 4, 4);
   switch (type) {
     case 'tc': drawTC(g, w, h, age); break;
@@ -175,6 +239,9 @@ function drawBuilding(g: CanvasRenderingContext2D, type: BType, variant: number,
       g.fillStyle = '#E2553F'; g.fillRect(x + 6, y + 12, w - 12, 4);
       g.fillStyle = '#9AA3B5'; for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) g.fillRect(x + 15 + c * 7, y + 20 + r * 7, 4, 4);
       break;
+    case 'ffarm': drawFactoryFarm(g); break;
+    case 'mill': drawMill(g); break;
+    case 'tower': drawTowers(g); break;
     case 'house': drawHouse(g, variant, age); break;
     case 'farm': drawFarm(g, age); break;
     case 'depot': drawDepot(g, age); break;
@@ -267,10 +334,11 @@ const once = (key: string, f: () => Texture) => { let t = cache.get(key); if (!t
 export const nodeTex = (t: NodeType) => once('n:' + t, () => make(T, T, (g) => drawNode(g, t)));
 const AGED = new Set<BType>(['tc', 'house', 'farm', 'depot']);
 export function buildingTex(t: BType, variant: number, opts: { dry?: boolean; foundation?: boolean; age?: number } = {}) {
-  const size = t === 'tc' || t === 'hq' || t === 'port' || t === 'airport' ? 2 * T : T;
+  const size = BIG.has(t) ? 2 * T : T;
   const key = `b:${t}:${t === 'house' ? variant % 6 : 0}:${opts.dry ? 1 : 0}:${opts.foundation ? 1 : 0}:${AGED.has(t) ? opts.age ?? 3 : 0}`;
   return once(key, () => make(size, size, (g) => {
-    if (opts.foundation) {
+    if (opts.foundation && AGRO_B.has(t)) drawAgroSite(g, t);
+    else if (opts.foundation) {
       g.fillStyle = 'rgba(255,255,255,.16)'; g.fillRect(2, 2, size - 4, size - 4);
       g.globalAlpha = 0.45; drawBuilding(g, t, variant, opts); g.globalAlpha = 1;
       g.setLineDash([4, 3]); g.strokeStyle = '#FFC726'; g.lineWidth = 1.5; g.strokeRect(2.5, 2.5, size - 5, size - 5); g.setLineDash([]);

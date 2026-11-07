@@ -314,3 +314,11 @@ button.pdot::before{content:'';position:absolute;inset:-8px -4px}
 #coach.compact p{display:inline;font-size:12.5px}
 #coach.compact .coach-top{float:right;margin-left:6px}
 #coach.compact .coach-dots{display:none}
+
+/* ---------- news about other co-ops and AgroCorp ---------- */
+.toast.news{display:flex;align-items:center;gap:8px;text-align:left;font:inherit;font-size:13px;color:var(--fg);cursor:pointer;pointer-events:auto;width:100%}
+.toast.news .ngo{margin-left:auto;color:var(--gold);flex:none}
+.ndot{width:10px;height:10px;border-radius:50%;flex:none;border:1.5px solid rgba(255,255,255,.7);display:inline-block}
+.news-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.news-list li{display:flex;align-items:center;gap:8px;font-size:13px;line-height:1.35}
+.news-list li .btn{margin-left:auto;flex:none;padding:6px 10px;font-size:12px}

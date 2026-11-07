@@ -1,5 +1,5 @@
 import {
-  AGES, AGRO, COMPOST_BONUS, COMPOST_R, HUB_DUES, MAX_AGE, WINDBREAK_R, AGRO_HOME, BOAT_COST, BOAT_RATE, BT, CARRY, DEALS, DIFFICULTY, DT, DUES, EAT, FEE, MAX_BOATS, RELIEF, RES, ROAD_COST, TOURISM, H, HNAMES, STALL, MAX_PLAYERS, NT, PLAYER_COLORS, SEA_R, SPEED, START_PARISHES, START_RES,
+  AGES, AGRO, AGRO_BUILDS, AGRO_BUILD_BOOST, AGRO_BUILD_EVERY, RUNOFF, RUNOFF_R, COMPOST_BONUS, COMPOST_R, HUB_DUES, MAX_AGE, WINDBREAK_R, AGRO_HOME, BOAT_COST, BOAT_RATE, BT, CARRY, DEALS, DIFFICULTY, DT, DUES, EAT, FEE, MAX_BOATS, RELIEF, RES, ROAD_COST, TOURISM, H, HNAMES, STALL, MAX_PLAYERS, NT, PLAYER_COLORS, SEA_R, SPEED, START_PARISHES, START_RES,
   TRAIN, TRAIN_COST, W, WIN_N, HOUSES, POP_MAX, canAfford, fmtCost, pay, type Cost,
   type BType, type DealId, type Difficulty, type Landmark, type NodeType, type Res,
 } from './defs';
@@ -28,7 +28,7 @@ export function createGame(o: NewGameOptions): State {
     seed, rng: seed, tick: 0, time: 0, mode: o.mode ?? 'coop', nextId: 1, map,
     parishes: parishes.map((p) => ({ ...p, owner: null })),
     nodes: [], nodeAt: new Int32Array(W * H).fill(-1), bAt: new Int32Array(W * H).fill(-1), roads: map.highway.slice(), roadVersion: 1,
-    buildings: {}, workers: {}, players: [], difficulty: o.difficulty ?? 'normal', agro: { bbd: 0, target: null, warned: false },
+    buildings: {}, workers: {}, players: [], difficulty: o.difficulty ?? 'normal', agro: { bbd: 0, target: null, warned: false, nextBuild: 0 },
     weather: { nextHurr: 300, hurrWarned: false, nextDrought: 210, droughtUntil: -1, nextPest: 130, stormT: 0, hurrIdx: 0 },
     events: [], eventSeq: 0, offers: [], parishVersion: 1, ended: null,
   };
@@ -316,6 +316,11 @@ function emit(s: State, kind: GameEvent['kind'], msg: string, to?: string) {
   s.events.push({ seq: ++s.eventSeq, t: s.time, kind, msg, to });
   if (s.events.length > 60) s.events.splice(0, s.events.length - 60);
 }
+/** A public headline: what a co-op or AgroCorp just did, and where. */
+function news(s: State, who: string, msg: string, at: { x: number; y: number }, kind: GameEvent['kind'] = 'info') {
+  s.events.push({ seq: ++s.eventSeq, t: s.time, kind, msg, news: true, who, at });
+  if (s.events.length > 60) s.events.splice(0, s.events.length - 60);
+}
 
 // ---------- workers
 
@@ -389,7 +394,7 @@ function updWorker(s: State, w: Worker, dt: number) {
     type = NT[n.type].res; rate = NT[n.type].rate * (n.type === 'spring' && drought(s) ? 0.5 : 1); goal = rectOf(n);
   } else {
     const b = s.buildings[t.b]; if (!b || !b.done) { setIdle(s, w); return; }
-    type = 'food'; rate = 0.85 * (b.pest > 0 ? 0.35 : 1) * (composted(s, b) ? COMPOST_BONUS : 1); goal = rectOf(b);
+    type = 'food'; rate = 0.85 * (b.pest > 0 ? 0.35 : 1) * (composted(s, b) ? COMPOST_BONUS : 1) * (runoff(s, b) ? RUNOFF : 1); goal = rectOf(b);
   }
   if (w.phase === 'to') {
     if (!w.path && !goTo(s, w, goal)) {
@@ -442,7 +447,11 @@ export function step(s: State): void {
     if (p.ageT >= 0) {
       p.ageT += dt;
       const next = AGES[p.age];
-      if (next && p.ageT >= next.time) { p.ageT = -1; p.age++; emit(s, 'good', `${next.name} reached. ${next.unlocks}`, p.id); }
+      if (next && p.ageT >= next.time) {
+        p.ageT = -1; p.age++; emit(s, 'good', `${next.name} reached. ${next.unlocks}`, p.id);
+        const tc = tcOf(s, p.id);
+        if (s.players.length > 1 && tc) news(s, p.id, `${p.name} reached the ${next.name}.`, { x: tc.x + 1, y: tc.y + 1 });
+      }
     }
     const hub = Object.values(s.buildings).some((b) => b.owner === p.id && b.type === 'hub' && b.done);
     const dues = DUES * owned(s, p.id) * (hub ? HUB_DUES : 1) * dt; p.res.bbd += dues; p.flow.gain.bbd += dues;
@@ -493,8 +502,15 @@ function landfall(s: State) {
   const wx = s.weather, name = HNAMES[wx.hurrIdx++ % HNAMES.length];
   wx.stormT = 5;
   const lost: Record<string, number> = {}, dmg: Record<string, number> = {};
+  let agroLost = 0;
   for (const b of Object.values(s.buildings)) {
-    if (b.owner === AGRO || b.owner === 'public') continue;
+    if (b.owner === 'public' || b.type === 'hq') continue;
+    if (b.owner === AGRO) {
+      // AgroCorp's sheds and sites take a beating too
+      if (!b.done) { if (rand(s) < 0.5) { removeBuilding(s, b); agroLost++; } }
+      else if (rand(s) < 0.6) { b.hp -= b.maxHp * (0.4 + rand(s) * 0.4); if (b.hp <= 0) { removeBuilding(s, b); agroLost++; } }
+      continue;
+    }
     // coral stone and newer houses stand up to a hurricane; a chattel house takes half the damage
     const wind = b.type === 'house' ? HOUSES[b.lvl - 1].wind : 0;
     const prot = protectedB(s, b) || wind === 2;
@@ -509,6 +525,7 @@ function landfall(s: State) {
   }
   for (const n of s.nodes) if (n.type === 'tree' && n.amt > 0 && rand(s) < 0.3) n.amt *= 0.5;
   s.agro.bbd *= 0.7;
+  if (agroLost) { const hq = Object.values(s.buildings).find((b) => b.type === 'hq'); news(s, AGRO, `${name} flattened ${agroLost === 1 ? 'one of AgroCorp\'s buildings' : `${agroLost} of AgroCorp's buildings`}.`, hq ? { x: hq.x + 1, y: hq.y + 1 } : { x: 0, y: 0 }, 'good'); }
   for (const p of s.players) {
     let lostBoats = 0; for (let k = 0; k < p.boats; k++) if (rand(s) < 0.3) lostBoats++;
     p.boats -= lostBoats;
@@ -542,7 +559,9 @@ function rival(s: State, dt: number) {
   const d = DIFFICULTY[s.difficulty], n = s.players.length;
   if (s.time < d.grace) return;
   const scale = s.mode === 'coop' ? 1 + 0.35 * (n - 1) : 1 + 0.15 * (n - 1);
-  s.agro.bbd += (1 + d.growth * owned(s, AGRO)) * d.rate * scale * dt;
+  const built = Object.values(s.buildings).filter((b) => b.owner === AGRO && b.done && b.type !== 'hq').length;
+  s.agro.bbd += (1 + d.growth * owned(s, AGRO)) * d.rate * scale * (1 + AGRO_BUILD_BOOST * built) * dt;
+  agroBuild(s, dt);
   const { list, mult } = rivalOptions(s);
   const ag = s.agro;
   // keep a target, and drop it if the parish is no longer available
@@ -564,6 +583,55 @@ function rival(s: State, dt: number) {
   ag.bbd -= price; ag.target = null; ag.warned = false; setOwner(s, p, AGRO);
   if (was) emit(s, 'bad', `AgroCorp bought out ${p.name}. It had no buildings to hold it.`, was);
   emit(s, 'bad', `AgroCorp bought up ${p.name}.`);
+}
+
+/** AgroCorp puts up a factory farm, a cane mill or company apartments on land it owns, one at a time. */
+function agroBuild(s: State, dt: number) {
+  const mine = Object.values(s.buildings).filter((b) => b.owner === AGRO && b.type !== 'hq');
+  // construction: no workers to pay, it just goes up
+  for (const b of mine) {
+    if (b.done) continue;
+    b.progress = Math.min(1, b.progress + dt / BT[b.type].build);
+    if (b.progress >= 1) {
+      b.done = true; b.hp = b.maxHp;
+      const p = s.parishes[s.map.pid[b.y * W + b.x]];
+      news(s, AGRO, b.type === 'ffarm' ? `AgroCorp's Factory Farm in ${p.name} is running. Farm plots near it grow less.` : `AgroCorp opened ${b.type === 'tower' ? 'Agro Towers' : 'a Cane Mill'} in ${p.name}. Its income is growing.`, { x: b.x + 1, y: b.y + 1 }, 'bad');
+    }
+  }
+  if (s.time < s.agro.nextBuild || mine.some((b) => !b.done)) return;
+  s.agro.nextBuild = s.time + AGRO_BUILD_EVERY;
+  // the parish with room, home parish allowed two; fewest AgroCorp buildings first
+  const count = (pid: number) => mine.filter((b) => s.map.pid[b.y * W + b.x] === pid).length;
+  const lands = s.parishes.filter((p) => p.owner === AGRO && count(p.id) < (p.id === AGRO_HOME ? 2 : 1)).sort((a, b) => count(a.id) - count(b.id) || a.id - b.id);
+  for (const p of lands) {
+    const at = agroSpot(s, p.id); if (!at) continue;
+    // whichever kind it has fewest of, in order: factory farm, cane mill, towers
+    const type = AGRO_BUILDS.reduce((best, t) => (mine.filter((b) => b.type === t).length < mine.filter((b) => b.type === best).length ? t : best));
+    const b = addBuilding(s, type, at[0], at[1], AGRO, false);
+    news(s, AGRO, `AgroCorp is building ${type === "tower" ? "" : "a "}${BT[type].name} in ${p.name}.`, { x: b.x + 1, y: b.y + 1 }, 'warn');
+    return;
+  }
+}
+/** A free 2x2 spot in a parish, off roads, coast, towns and resources, nearest its middle; null if there's none. */
+function agroSpot(s: State, pidx: number): [number, number] | null {
+  const p = s.parishes[pidx], m = s.map;
+  const d = (i: number) => (ix(i) - p.lx) ** 2 + (iy(i) - (p.ly + 2.5)) ** 2; // just below the parish name
+  for (const i of p.tiles.slice().sort((a, b) => d(a) - d(b))) {
+    const x = ix(i), y = iy(i); let good = true;
+    for (let dy = -1; dy < 3 && good; dy++) for (let dx = -1; dx < 3; dx++) {
+      if (!inB(x + dx, y + dy)) { good = false; break; }
+      const j = (y + dy) * W + x + dx, inner = dx >= 0 && dx < 2 && dy >= 0 && dy < 2;
+      // the 2x2 itself must be clear land; the ring around it just free of buildings, so it isn't boxed in
+      if (s.bAt[j] >= 0 || (inner && (!m.land[j] || m.coast[j] || m.urban[j] || s.roads[j] || m.pid[j] !== p.id || s.nodeAt[j] >= 0))) { good = false; break; }
+    }
+    if (good) return [x, y];
+  }
+  return null;
+}
+/** Whether a factory farm's runoff reaches this farm plot. */
+export function runoff(s: State, b: Building): boolean {
+  for (const f of Object.values(s.buildings)) if (f.type === 'ffarm' && f.done && dist(f.x + 1 - (b.x + 0.5), f.y + 1 - (b.y + 0.5)) <= RUNOFF_R) return true;
+  return false;
 }
 
 export function winTarget(s: State) { return s.mode === 'versus' && s.players.length > 2 ? 4 : WIN_N; }
@@ -642,7 +710,7 @@ export function applyCommand(s: State, pid: string, c: Command): CmdResult {
       return fail('Nothing to do there.');
     }
     case 'place': {
-      const d = BT[c.building]; if (!d || c.building === 'tc' || c.building === 'hq') return fail('Unknown building.');
+      const d = BT[c.building]; if (!d || ['tc', 'hq', 'port', 'airport', 'ffarm', 'mill', 'tower'].includes(c.building)) return fail('Unknown building.');
       const r = placeBlock(s, pid, c.building, c.x, c.y); if (r) return fail(r);
       const cost = buildCost(s, pid, c.building), nm = bName({ type: c.building, lvl: houseLevelFor(s, pid) });
       if (!canAfford(me.res, cost)) return fail(`Not enough for a ${nm}: needs ${fmtCost(cost)}.`);
@@ -692,6 +760,7 @@ export function applyCommand(s: State, pid: string, c: Command): CmdResult {
       spend(me, up.cost);
       const was = HOUSES[b.lvl - 1], next = HOUSES[up.to - 1];
       b.lvl = up.to; b.maxHp = next.hp; b.hp = next.hp;
+      if (up.to >= 4 && s.players.length > 1) news(s, pid, `${me.name} built ${up.to === 5 ? 'an' : 'a'} ${next.name}.`, { x: b.x + 0.5, y: b.y + 0.5 });
       return { ok: true, msg: `Upgraded to a ${next.name}: now houses ${next.pop} people (was ${was.pop}).` };
     }
     case 'repair': {
@@ -775,6 +844,7 @@ export function applyCommand(s: State, pid: string, c: Command): CmdResult {
       const cost = claimCost(s, pid, p); if (!canAfford(me.res, cost)) return fail(`Feeding ${p.name} needs ${fmtCost(cost)}.`);
       const was = p.owner; spend(me, cost); setOwner(s, p, pid);
       emit(s, 'good', `${p.name} is fed by your co-op now. Put a building there so it can't be bought out.`, pid);
+      if (s.players.length > 1) news(s, pid, `${me.name} now feeds ${p.name}.`, { x: p.lx, y: p.ly }, 'info');
       if (was && was !== AGRO) emit(s, 'bad', `${me.name} won ${p.name} from you.`, was);
       checkEnd(s); return { ok: true };
     }
@@ -812,6 +882,7 @@ export function restore(snap: Snapshot): State {
   for (const n of rest.nodes) { if (n.max === null) n.max = Infinity; if (n.amt === null) n.amt = Infinity; }
   // saves from before house levels
   for (const b of Object.values(rest.buildings)) b.lvl ??= 1;
+  rest.agro.nextBuild ??= 0;
   return {
     ...(rest as Omit<State, 'map' | 'parishes' | 'nodeAt' | 'bAt' | 'roads'>),
     map, parishes: parishes.map((p, k) => ({ ...p, owner: owners[k] ?? null })),

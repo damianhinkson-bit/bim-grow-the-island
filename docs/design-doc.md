@@ -266,6 +266,12 @@ Up to **4 players** online, alongside single-player:
 - **Slimmer top area:** status chips are short ("Foraging 1/5", "4:59"), the AgroCorp line and Solo label are gone (AgroCorp's details are in its pop-up).
 - **Guided first steps:** pick a worker, gather food, train a worker, cut stone, build a home, check your money. A bouncing gold pointer shows what to tap and the button to press pulses. Skippable, shown once; How to play can turn it back on.
 
+### Watching the other side (v0.9)
+
+- **AgroCorp builds on its land**, one building at a time every ~50 s after its grace period: Factory Farm (sheds, silo, pen), Cane Mill (smokestack, cane heap) and Agro Towers (company apartments). One per parish it owns, two in its home parish, whichever kind it has fewest of. Sites show a concrete pad, steel frame and crane; red-overalled workers work round sites, walk out to the fields from finished buildings and come and go at HQ (drawn from the game state, so every phone shows the same).
+- Each finished AgroCorp building adds 4% to its income (an unchallenged AgroCorp buys the island about 2 min sooner on Normal). Factory Farm runoff: player farm plots within 4 tiles grow at 75%. Hurricanes damage and can flatten its buildings and sites.
+- **News feed:** public headlines when a co-op feeds a parish, reaches an age or builds a Townhouse or Apartment Block, and when AgroCorp starts, finishes or loses a building. They pop up with that side's colour (one every few seconds, queued) and a tap jumps the map there; the dashboard keeps a News list with Show buttons.
+
 - **Not testable here:** real iPhone Safari (its engine can't be downloaded in this workspace). Test on an iPhone before a big session.
 
 ## 15. Build plan

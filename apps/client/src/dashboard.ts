@@ -151,5 +151,11 @@ export function dashboardHTML(s: State, me: string, tr: FlowTracker, isOn: (pid:
       <dt>Pests</dt><dd>${pests ? `${pests} farm${pests > 1 ? 's' : ''} hit` : 'none'}</dd>
     </dl></section>`;
   const sell = p.res.food >= STALL.food && tc ? `<button class="btn" data-act="stall-food">Sell ${STALL.food} food<small>+${STALL.bbd} BBD</small></button>` : '';
-  return `<div class="dgrid">${playersCard}${food}${ageCard}${people}${stock}${workers}${landHTML}${trade}${blds}${pars}${threats}</div>${sell ? `<div class="btns dfoot">${sell}</div>` : ''}`;
+  // ---------- news: what everyone else has been doing
+  const items = s.events.filter((e) => e.news && e.who !== me).slice(-8).reverse();
+  const newsCard = items.length ? `<section class="dcard"><h4>News</h4><ul class="news-list">${items.map((e) => {
+    const c = e.who === AGRO ? '#E2553F' : player(s, e.who!)?.color ?? '#fff', ago = Math.max(0, Math.round((s.time - e.t) / 60));
+    return `<li><i class="ndot" style="background:${c}"></i><span>${e.msg.replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[ch]!)} <span class="muted">${ago ? `${ago} min ago` : 'just now'}</span></span>${e.at ? `<button class="btn" data-act="goto:${e.at.x},${e.at.y}" aria-label="Show on the map">Show</button>` : ''}</li>`;
+  }).join('')}</ul></section>` : '';
+  return `<div class="dgrid">${playersCard}${newsCard}${food}${ageCard}${people}${stock}${workers}${landHTML}${trade}${blds}${pars}${threats}</div>${sell ? `<div class="btns dfoot">${sell}</div>` : ''}`;
 }

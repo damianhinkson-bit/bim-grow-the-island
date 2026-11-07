@@ -287,3 +287,22 @@ describe('computer co-ops', () => {
     expect(stateHash(play())).toBe(stateHash(s));
   }, 60000);
 });
+
+describe('AgroCorp builds', () => {
+  it('puts up factory farms, mills and towers on its land, with public news, and its runoff slows nearby farm plots', async () => {
+    const { runoff, BT } = await import('../src');
+    const s = createGame({ seed: 7, players: [{ name: 'A' }] });
+    for (let t = 0; t < 9000 && !s.ended; t++) step(s); // 15 minutes with nobody playing
+    const agro = Object.values(s.buildings).filter((b) => b.owner === AGRO && b.type !== 'hq');
+    expect(agro.length).toBeGreaterThanOrEqual(2);
+    expect(agro.some((b) => b.done && b.type === 'ffarm')).toBe(true);
+    const headlines = s.events.filter((e) => e.news && e.who === AGRO);
+    expect(headlines.some((e) => e.msg.includes('is building'))).toBe(true);
+    for (const b of agro) { expect(s.map.land[b.y * W + b.x]).toBe(1); expect(s.parishes[s.map.pid[b.y * W + b.x]].owner).toBe(AGRO); }
+    // a farm plot right next to a factory farm is hit by its runoff
+    const ff = agro.find((b) => b.type === 'ffarm' && b.done)!;
+    expect(runoff(s, { ...ff, type: 'farm', x: ff.x + 2, y: ff.y } as never)).toBe(true);
+    expect(runoff(s, { ...ff, type: 'farm', x: ff.x + 12, y: ff.y } as never)).toBe(false);
+    void BT;
+  }, 60000);
+});
